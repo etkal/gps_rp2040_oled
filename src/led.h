@@ -97,7 +97,7 @@ private:
     std::vector<uint32_t> m_vPixels;
 };
 
-#if defined(RASPBERRYPI_PICO_W)
+#if defined(PLATFORM_PICO_W)
 class LED_pico_w : public LED
 {
 public:

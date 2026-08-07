@@ -6,7 +6,7 @@
  */
 
 #include "pico/stdlib.h"
-#if defined(RASPBERRYPI_PICO_W)
+#if defined(PLATFORM_PICO_W)
 #include "pico/cyw43_arch.h"
 #endif
 #include "led.h"
@@ -136,7 +136,7 @@ void LED_neo::SetPixel(uint idx, uint32_t color)
 }
 
 
-#if defined(RASPBERRYPI_PICO_W)
+#if defined(PLATFORM_PICO_W)
 LED_pico_w::LED_pico_w(uint pin)
     : m_nPin(pin),
       m_nColor(led_white)

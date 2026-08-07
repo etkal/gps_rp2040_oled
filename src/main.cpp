@@ -25,11 +25,12 @@
 #include <pico/stdlib.h>
 #include "hardware/adc.h"
 
-#if defined(RASPBERRYPI_PICO_W)
+#if defined(PLATFORM_PICO_W)
 #include "pico/cyw43_arch.h"
 #endif
 
 #include "gps_oled.h"
+#include "timemgr.h"
 
 #define UART0_DEVICE uart0                    // Default is uart0
 #define PIN_UART0_TX PICO_DEFAULT_UART_TX_PIN // Default is 0
@@ -67,6 +68,8 @@ extern "C"
 {
     int _getentropy(void* buffer, size_t length)
     {
+        (void)buffer;
+        (void)length;
         return ENOSYS;
     }
 }
@@ -77,7 +80,7 @@ int main()
     adc_init();
 
 #if !defined(NDEBUG)
-    sleep_ms(10000);
+    sleep_ms(5000);
 #endif
 
     // Set up UART for GPS device
@@ -110,7 +113,7 @@ int main()
     LED_pico ledRed(17);   // red
 #endif
 
-#if defined(RASPBERRYPI_PICO_W)
+#if defined(PLATFORM_PICO_W)
     cyw43_arch_init();
 #endif
 
@@ -130,7 +133,7 @@ int main()
 #elif defined(PICO_DEFAULT_LED_PIN)
     spLED = std::make_shared<LED_pico>(PICO_DEFAULT_LED_PIN);
     spLED->SetIgnore({led_red, led_magenta});
-#elif defined(RASPBERRYPI_PICO_W)
+#elif defined(PLATFORM_PICO_W)
     spLED = std::make_shared<LED_pico_w>(CYW43_WL_GPIO_LED_PIN);
     spLED->SetIgnore({led_red, led_magenta});
 #endif
@@ -142,17 +145,19 @@ int main()
     GPS::Shared spGPS = std::make_shared<GPS>(UART0_DEVICE);
 #endif
 
+    TimeMgr::Shared spTimeMgr = std::make_shared<TimeMgr>(TIME_ZONE);
+
     // Create the display
     SSD1306::Shared spDisplay = std::make_shared<SSD1306_I2C>(128, 64, I2C_DEVICE);
 
     // Create the GPS_OLED display object
-    GPS_OLED::Shared spDevice = std::make_shared<GPS_OLED>(spDisplay, spGPS, spLED, GPSD_GMT_OFFSET);
+    GPS_OLED::Shared spDevice = std::make_shared<GPS_OLED>(spDisplay, spGPS, spLED, spTimeMgr);
 
     spDevice->Initialize();
     // Run the show
     spDevice->Run();
 
-#if defined(RASPBERRYPI_PICO_W)
+#if defined(PLATFORM_PICO_W)
     cyw43_arch_deinit();
 #endif
 
