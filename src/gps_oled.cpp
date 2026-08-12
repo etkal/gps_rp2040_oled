@@ -30,6 +30,7 @@
 #include <iomanip>
 
 #include "pico/stdlib.h"
+#include "pico/multicore.h"
 #include "hardware/gpio.h"
 #include "hardware/uart.h"
 
@@ -54,14 +55,19 @@ static uint32_t getFreeHeap()
 
 #define SAT_ICON_RADIUS 2
 
-constexpr double pi = 3.14159265359;
+namespace
+{
+    constexpr uint64_t timeSyncRetryIntervalSec = 5 * 60;
+    constexpr double pi = 3.14159265359;
+} // namespace
 
-GPS_OLED::GPS_OLED(SSD1306::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED, float GMToffset)
+GPS_OLED::GPS_OLED(SSD1306::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED)
     : m_spDisplay(spDisplay),
       m_spGPS(spGPS),
       m_spLED(spLED),
-      m_GMToffset(GMToffset)
+      m_nLastTimeSyncAttemptSec(std::numeric_limits<uint64_t>::max())
 {
+    critical_section_init(&m_GpsDataCallbackCS);
 }
 
 GPS_OLED::~GPS_OLED()
@@ -87,7 +93,39 @@ void GPS_OLED::Initialize()
 
 void GPS_OLED::Run()
 {
-    m_spGPS->Run();
+    // Start GPS processing loop on processor core 1
+    static auto sm_spGPS = m_spGPS; // Capture shared pointer for use in lambda
+    multicore_launch_core1([]() {
+        GPS::Shared spGPS = sm_spGPS;
+        spGPS->Run();
+    });
+
+    // Main loop for updating the display
+    while (true)
+    {
+        sleep_ms(10); // Sleep for 10ms to avoid busy waiting
+
+        bool bHasQueuedGpsData = false;
+        // Check if we have new GPS data to display, just take the most recent one and discard the rest to avoid UI lag
+        critical_section_enter_blocking(&m_GpsDataCallbackCS);
+        if (!m_qGPSData.empty())
+        {
+            bHasQueuedGpsData = true;
+            m_spGPSData = m_qGPSData.back();
+            while (!m_qGPSData.empty())
+            {
+                m_qGPSData.pop();
+            }
+        }
+        critical_section_exit(&m_GpsDataCallbackCS);
+
+        if (bHasQueuedGpsData && m_spGPSData)
+        {
+            LogInfo("GPS_OLED - Updating UI");
+            updateUI(m_spGPSData);
+            m_spGPSData.reset(); // Free the data
+        }
+    }
 }
 
 void GPS_OLED::sentenceCB(void* pCtx, std::string strSentence)
@@ -97,8 +135,23 @@ void GPS_OLED::sentenceCB(void* pCtx, std::string strSentence)
 
 void GPS_OLED::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
 {
+    LogInfo("GPS_OLED - received GPS data");
+    // This callback is called from the GPS processing loop when new GPS data is available.
+    // It most likely runs on a different thread/core than the main display loop, so we need
+    // to ensure thread safety.  We will perform a deep copy of the GPSData and then call
+    // updateUI() on the main thread in the run loop as soon as queued data is available.
     GPS_OLED* pThis = reinterpret_cast<GPS_OLED*>(pCtx);
-    pThis->updateUI(spGPSData);
+    if (nullptr == pThis)
+    {
+        LogInfo("gpsDataCB: pCtx is null");
+        return;
+    }
+
+    // Make a deep copy of the GPSData to avoid issues with shared ownership and data races
+    critical_section_enter_blocking(&pThis->m_GpsDataCallbackCS);
+    GPSData::Shared spGPSDataCopy = std::make_shared<GPSData>(*spGPSData);
+    pThis->m_qGPSData.push(spGPSDataCopy);
+    critical_section_exit(&pThis->m_GpsDataCallbackCS);
 }
 
 void GPS_OLED::updateUI(GPSData::Shared spGPSData)
@@ -117,7 +170,29 @@ void GPS_OLED::updateUI(GPSData::Shared spGPSData)
         m_spLED->Blink_ms(20);
     }
 
-    uint16_t nWidth  = m_spDisplay->Width();
+    // Update the time if necessary
+    if (!m_spGPSData->strGPSTimeRaw.empty() && !m_spGPSData->strGPSDateRaw.empty())
+    {
+        const uint64_t uptimeSec = time_us_64() / 1000000;
+        const bool bNeverRetried = (m_nLastTimeSyncAttemptSec == std::numeric_limits<uint64_t>::max());
+        const bool bRetryDue = !TimeMgr::IsWallClockValid() || bNeverRetried ||
+                               (uptimeSec - m_nLastTimeSyncAttemptSec >= timeSyncRetryIntervalSec);
+        if (bRetryDue)
+        {
+            m_nLastTimeSyncAttemptSec = uptimeSec;
+            LogInfo("Attempting GPS time sync");
+            if (TimeMgr::SetTimeFromGps(m_spGPSData->strGPSTimeRaw, m_spGPSData->strGPSDateRaw))
+            {
+                LogInfo("GPS time synchronized");
+            }
+            else
+            {
+                LogInfo("GPS time sync failed");
+            }
+        }
+    }
+
+    uint16_t nWidth = m_spDisplay->Width();
     uint16_t nHeight = m_spDisplay->Height();
 
     // Compute padding dynamically from font dimensions
@@ -126,8 +201,8 @@ void GPS_OLED::updateUI(GPSData::Shared spGPSData)
     uint X_PAD = PAD_CHARS_X * getCharWidth();
     // uint Y_PAD = PAD_CHARS_Y * (getCharHeight() + 1);
 
-#if defined(VOLTAGE_DISPLAY)
-    float vsys    = 0.0;
+#if defined(PLATFORM_PICO)
+    float vsys = 0.0;
     bool bBattery = false;
     std::string strVsys;
     if (PICO_OK == power_voltage(&vsys))
@@ -164,7 +239,7 @@ void GPS_OLED::updateUI(GPSData::Shared spGPSData)
         drawText(-1, spGPSData->strGPSTime, COLOUR_WHITE, true, X_PAD);
     }
 
-#if defined(VOLTAGE_DISPLAY)
+#if defined(PLATFORM_PICO)
     if (!strVsys.empty() && getCharHeight() <= 8) // only if room
     {
         drawText(-2, strVsys, COLOUR_WHITE, true, X_PAD);
@@ -177,7 +252,7 @@ void GPS_OLED::updateUI(GPSData::Shared spGPSData)
     m_spGPSData.reset();
 
 #if !defined(NDEBUG)
-    printf("Total Heap: %d  Free Heap: %d\n", getTotalHeap(), getFreeHeap());
+    std::cout << "Total Heap: " << getTotalHeap() << "  Free Heap: " << getFreeHeap() << std::endl;
 #endif
 }
 
@@ -191,7 +266,7 @@ void GPS_OLED::drawSatGrid(uint xCenter, uint yCenter, uint radius, uint nRings)
     m_spDisplay->VLine(xCenter, yCenter - radius - 2, 2 * radius + 5, COLOUR_WHITE);
     m_spDisplay->HLine(xCenter - radius - 2, yCenter, 2 * radius + 5, COLOUR_WHITE);
     // m_spDisplay->Text("N", xCenter - getCharWidth() / 2, yCenter - radius - getCharHeight(), COLOUR_RED);
-    m_spDisplay->Text("^", xCenter - getCharWidth() / 2, yCenter - radius - getCharHeight(), COLOUR_RED);
+    m_spDisplay->Text("^", xCenter - getCharWidth() / 2 + 1, yCenter - radius - getCharHeight() / 2, COLOUR_RED);
     // m_spDisplay->Text("'", xCenter - 6, yCenter - radius - getCharHeight() / 2, COLOUR_RED);
     // m_spDisplay->Text("`", xCenter - 2, yCenter - radius - getCharHeight() / 2, COLOUR_RED);
 
@@ -202,7 +277,7 @@ void GPS_OLED::drawSatGrid(uint xCenter, uint yCenter, uint radius, uint nRings)
     }
     for (auto oEntry : m_spGPSData->mSatList)
     {
-        auto oSat    = oEntry.second;
+        auto oSat = oEntry.second;
         double elrad = oSat.m_el * pi / 180;
         double azrad = oSat.m_az * pi / 180;
         drawCircleSat(xCenter, yCenter, radius, elrad, azrad, satRadius, COLOUR_WHITE, COLOUR_BLACK);
@@ -229,8 +304,8 @@ void GPS_OLED::drawCircleSat(uint gridCenterX,
     // Draw satellite (fill first, then draw open circle)
     int dx = (nGridRadius - SAT_ICON_RADIUS) * cos(elrad) * sin(azrad);
     int dy = (nGridRadius - SAT_ICON_RADIUS) * cos(elrad) * -cos(azrad);
-    int x  = gridCenterX + dx;
-    int y  = gridCenterY + dy;
+    int x = gridCenterX + dx;
+    int y = gridCenterY + dy;
     m_spDisplay->Ellipse(x, y, satRadius, satRadius, fillColor, true); // Clear area with fill
     m_spDisplay->Ellipse(x, y, satRadius, satRadius, color);           // Draw circle without fill
 }
@@ -247,6 +322,6 @@ void GPS_OLED::drawText(int nLine, std::string strText, uint16_t color, bool bRi
 {
     int x = (!bRightAlign) ? 0 : m_spDisplay->Width() - (strText.length() * getCharWidth());
     int y = linePos(nLine);
-    x     = x - nRightPad;
+    x = x - nRightPad;
     m_spDisplay->Text(strText.c_str(), x, y, color);
 }
