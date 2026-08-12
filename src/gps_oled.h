@@ -1,7 +1,7 @@
 /*
  * GPS using OLED display
  *
- * (c) 2023 Erik Tkal
+ * (c) 2023-2026 Erik Tkal
  *
  */
 
@@ -34,7 +34,7 @@ class GPS_OLED
 public:
     typedef std::shared_ptr<GPS_OLED> Shared;
 
-    GPS_OLED(SSD1306::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED, TimeMgr::Shared spTimeMgr);
+    GPS_OLED(SSD1306::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED);
     ~GPS_OLED();
 
     void Initialize();
@@ -54,7 +54,7 @@ private:
                        float elrad,
                        float azrad,
                        uint satRadius,
-                       uint16_t color     = COLOUR_WHITE,
+                       uint16_t color = COLOUR_WHITE,
                        uint16_t fillColor = COLOUR_WHITE);
     int linePos(int nLine);
     void drawText(int nLine, std::string strText, uint16_t color = COLOUR_WHITE, bool bRightAlign = true, uint nPadding = 0);
@@ -92,8 +92,6 @@ private:
     LED::Shared m_spLED;
     GPSData::Shared m_spGPSData;
     std::queue<GPSData::Shared> m_qGPSData; // Queue of GPS data to be processed by the display loop
-    TimeMgr::Shared m_spTimeMgr;
     uint64_t m_nLastTimeSyncAttemptSec;
     critical_section m_GpsDataCallbackCS; // Protects access to GPS data queue
-    uint64_t m_nLastUpdateUISecond;
 };

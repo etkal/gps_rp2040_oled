@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2025 Erik Tkal
+ * Copyright (c) 2025-2026 Erik Tkal
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -129,12 +129,15 @@ int main()
     spLED->SetPixel(0, led_green);
 #elif defined(USE_LED_PIN)
     spLED = std::make_shared<LED_pico>(USE_LED_PIN);
+    spLED->Initialize();
     spLED->SetIgnore({led_red, led_magenta});
 #elif defined(PICO_DEFAULT_LED_PIN)
     spLED = std::make_shared<LED_pico>(PICO_DEFAULT_LED_PIN);
+    spLED->Initialize();
     spLED->SetIgnore({led_red, led_magenta});
 #elif defined(PLATFORM_PICO_W)
     spLED = std::make_shared<LED_pico_w>(CYW43_WL_GPIO_LED_PIN);
+    spLED->Initialize();
     spLED->SetIgnore({led_red, led_magenta});
 #endif
 
@@ -145,13 +148,13 @@ int main()
     GPS::Shared spGPS = std::make_shared<GPS>(UART0_DEVICE);
 #endif
 
-    TimeMgr::Shared spTimeMgr = std::make_shared<TimeMgr>(TIME_ZONE);
+    TimeMgr::InitializeSingleton(TIME_ZONE);
 
     // Create the display
     SSD1306::Shared spDisplay = std::make_shared<SSD1306_I2C>(128, 64, I2C_DEVICE);
 
     // Create the GPS_OLED display object
-    GPS_OLED::Shared spDevice = std::make_shared<GPS_OLED>(spDisplay, spGPS, spLED, spTimeMgr);
+    GPS_OLED::Shared spDevice = std::make_shared<GPS_OLED>(spDisplay, spGPS, spLED);
 
     spDevice->Initialize();
     // Run the show
