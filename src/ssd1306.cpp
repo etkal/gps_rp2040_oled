@@ -209,15 +209,23 @@ void SSD1306::Text(const char* str, int x, int y, uint16_t color, const BitmapFo
 // SSD1306_I2C
 //
 
-SSD1306_I2C::SSD1306_I2C(uint nWidth, uint nHeight, i2c_inst_t* i2c, uint8_t addr, bool bExternalVcc)
+SSD1306_I2C::SSD1306_I2C(uint nWidth, uint nHeight, i2c_inst_t* i2c, uint sdaPin, uint sclPin, uint baudrate, uint8_t addr, bool bExternalVcc)
     : SSD1306(nWidth, nHeight, bExternalVcc),
       m_i2c(i2c),
+      m_sdaPin(sdaPin),
+      m_sclPin(sclPin),
+      m_baudrate(baudrate),
       m_addr(addr)
 {
 }
 
 void SSD1306_I2C::initInternal()
 {
+    i2c_init(m_i2c, m_baudrate);
+    gpio_set_function(m_sdaPin, GPIO_FUNC_I2C);
+    gpio_set_function(m_sclPin, GPIO_FUNC_I2C);
+    gpio_pull_up(m_sdaPin);
+    gpio_pull_up(m_sclPin);
 }
 
 void SSD1306_I2C::write_cmd(uint8_t cmd)

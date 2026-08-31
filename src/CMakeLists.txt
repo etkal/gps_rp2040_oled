@@ -3,6 +3,7 @@ target_sources(gps_oled PUBLIC
     framebuf.cpp
     gps_oled.cpp
     gps.cpp
+    gps_uart.cpp
     ssd1306.cpp
     led.cpp
     main.cpp

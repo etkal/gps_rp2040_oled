@@ -22,7 +22,8 @@
  */
 
 #include <iostream>
-#include <pico/stdlib.h>
+
+#include "pico/stdlib.h"
 #include "hardware/adc.h"
 
 #if defined(PLATFORM_PICO_W)
@@ -30,6 +31,7 @@
 #endif
 
 #include "gps_oled.h"
+#include "gps_uart.h"
 #include "timemgr.h"
 
 #define UART0_DEVICE uart0                    // Default is uart0
@@ -60,10 +62,6 @@
 // #define USE_WS2812_PIN 12 // Override
 // #define USE_LED_PIN 16    // Override
 
-#if !defined(GPSD_GMT_OFFSET)
-#define GPSD_GMT_OFFSET 0.0
-#endif
-
 extern "C"
 {
     int _getentropy(void* buffer, size_t length)
@@ -76,35 +74,15 @@ extern "C"
 
 int main()
 {
-    stdio_init_all();
+    stdio_usb_init();
     adc_init();
 
 #if !defined(NDEBUG)
     sleep_ms(5000);
 #endif
 
-    // Set up UART for GPS device
-    uart_init(UART0_DEVICE, UART_BAUD_RATE);
-    gpio_set_function(PIN_UART0_TX, GPIO_FUNC_UART);
-    gpio_set_function(PIN_UART0_RX, GPIO_FUNC_UART);
-    uart_set_hw_flow(UART0_DEVICE, false, false);
-    uart_set_format(UART0_DEVICE, DATA_BITS, STOP_BITS, PARITY);
-
-#if defined(UART1_DEVICE)
-    // Set up UART for echo device
-    uart_init(UART1_DEVICE, UART_BAUD_RATE);
-    gpio_set_function(PIN_UART1_TX, GPIO_FUNC_UART);
-    gpio_set_function(PIN_UART1_RX, GPIO_FUNC_UART);
-    uart_set_hw_flow(UART1_DEVICE, false, false);
-    uart_set_format(UART1_DEVICE, DATA_BITS, STOP_BITS, PARITY);
-#endif
-
-    // Set up the OLED display
-    i2c_init(I2C_DEVICE, 400 * 1000);
-    gpio_set_function(PIN_SDA, GPIO_FUNC_I2C);
-    gpio_set_function(PIN_SCL, GPIO_FUNC_I2C);
-    gpio_pull_up(PIN_SDA);
-    gpio_pull_up(PIN_SCL);
+    TimeMgr::InitializeSingleton(TIME_ZONE); // Needed for logging timestamps
+    LogInfo("Starting GPS OLED application...");
 
 #if defined(SEEED_XIAO_RP2040)
     // Clear LED(s) on XIAO (default on)
@@ -141,17 +119,18 @@ int main()
     spLED->SetIgnore({led_red, led_magenta});
 #endif
 
-// Create the GPS object
+    LogInfo("Creating GPS object...");
+
+    // Create the GPS object
+    GPS_UART::Shared spGPS = std::make_shared<GPS_UART>();
+    spGPS->SetInputUART(UART0_DEVICE, PIN_UART0_TX, PIN_UART0_RX, DATA_BITS, STOP_BITS, PARITY, UART_BAUD_RATE);
 #if defined(UART1_DEVICE)
-    GPS::Shared spGPS = std::make_shared<GPS>(UART0_DEVICE, UART1_DEVICE);
-#else
-    GPS::Shared spGPS = std::make_shared<GPS>(UART0_DEVICE);
+    spGPS->SetOutputUART(UART1_DEVICE, PIN_UART1_TX, PIN_UART1_RX, DATA_BITS, STOP_BITS, PARITY, UART_BAUD_RATE);
 #endif
 
-    TimeMgr::InitializeSingleton(TIME_ZONE);
-
+    LogInfo("Creating display object...");
     // Create the display
-    SSD1306::Shared spDisplay = std::make_shared<SSD1306_I2C>(128, 64, I2C_DEVICE);
+    SSD1306::Shared spDisplay = std::make_shared<SSD1306_I2C>(128, 64, I2C_DEVICE, PIN_SDA, PIN_SCL);
 
     // Create the GPS_OLED display object
     GPS_OLED::Shared spDevice = std::make_shared<GPS_OLED>(spDisplay, spGPS, spLED);
@@ -164,5 +143,6 @@ int main()
     cyw43_arch_deinit();
 #endif
 
+    LogInfo("Exiting...");
     return 0;
 }

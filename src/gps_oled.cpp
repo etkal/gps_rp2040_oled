@@ -83,9 +83,7 @@ void GPS_OLED::Initialize()
     m_spDisplay->SetFont(get_terminus_font(12));
 
     m_spDisplay->SetContrast(0x10);
-    m_spDisplay->Fill(COLOUR_BLACK);
-    drawText(0, "Waiting for GPS", COLOUR_WHITE, false, 0);
-    m_spDisplay->Show();
+    showWaitingForGPS();
 
     m_spGPS->SetSentenceCallback(this, sentenceCB);
     m_spGPS->SetGpsDataCallback(this, gpsDataCB);
@@ -97,33 +95,41 @@ void GPS_OLED::Run()
     static auto sm_spGPS = m_spGPS; // Capture shared pointer for use in lambda
     multicore_launch_core1([]() {
         GPS::Shared spGPS = sm_spGPS;
+        spGPS->Initialize();
         spGPS->Run();
+    });
+
+    m_spIdleTimer = std::make_shared<AlarmTimer>([this]() {
+        LogInfo("GPS_OLED - No GPS data received, showing waiting message");
+        showWaitingForGPS();
     });
 
     // Main loop for updating the display
     while (true)
     {
-        sleep_ms(10); // Sleep for 10ms to avoid busy waiting
+        busy_wait_ms(10); // Sleep for 10ms to avoid busy waiting
 
         bool bHasQueuedGpsData = false;
+        GPSData::Shared spGPSData;
         // Check if we have new GPS data to display, just take the most recent one and discard the rest to avoid UI lag
         critical_section_enter_blocking(&m_GpsDataCallbackCS);
         if (!m_qGPSData.empty())
         {
             bHasQueuedGpsData = true;
-            m_spGPSData = m_qGPSData.back();
             while (!m_qGPSData.empty())
             {
+                spGPSData = m_qGPSData.front();
                 m_qGPSData.pop();
             }
         }
         critical_section_exit(&m_GpsDataCallbackCS);
 
-        if (bHasQueuedGpsData && m_spGPSData)
+        if (bHasQueuedGpsData && spGPSData)
         {
             LogInfo("GPS_OLED - Updating UI");
-            updateUI(m_spGPSData);
-            m_spGPSData.reset(); // Free the data
+            updateUI(spGPSData);
+            spGPSData.reset();           // Free the data
+            m_spIdleTimer->Start(10000); // Reset the idle timer to 10 seconds
         }
     }
 }
@@ -154,6 +160,13 @@ void GPS_OLED::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
     critical_section_exit(&pThis->m_GpsDataCallbackCS);
 }
 
+void GPS_OLED::showWaitingForGPS()
+{
+    m_spDisplay->Fill(COLOUR_BLACK);
+    drawText(0, "Waiting for GPS", COLOUR_WHITE, false, 0);
+    m_spDisplay->Show();
+}
+
 void GPS_OLED::updateUI(GPSData::Shared spGPSData)
 {
     m_spGPSData = spGPSData;
@@ -175,9 +188,10 @@ void GPS_OLED::updateUI(GPSData::Shared spGPSData)
     {
         const uint64_t uptimeSec = time_us_64() / 1000000;
         const bool bNeverRetried = (m_nLastTimeSyncAttemptSec == std::numeric_limits<uint64_t>::max());
-        const bool bRetryDue = !TimeMgr::IsWallClockValid() || bNeverRetried ||
-                               (uptimeSec - m_nLastTimeSyncAttemptSec >= timeSyncRetryIntervalSec);
-        if (bRetryDue)
+        const bool bUpdateDue = !TimeMgr::IsWallClockValid() || bNeverRetried ||
+                                (uptimeSec - m_nLastTimeSyncAttemptSec >= timeSyncRetryIntervalSec) ||
+                                !TimeMgr::IsGpsTimeDateWithinOneSecond(m_spGPSData->strGPSTimeRaw, m_spGPSData->strGPSDateRaw);
+        if (bUpdateDue)
         {
             m_nLastTimeSyncAttemptSec = uptimeSec;
             LogInfo("Attempting GPS time sync");
@@ -252,7 +266,7 @@ void GPS_OLED::updateUI(GPSData::Shared spGPSData)
     m_spGPSData.reset();
 
 #if !defined(NDEBUG)
-    std::cout << "Total Heap: " << getTotalHeap() << "  Free Heap: " << getFreeHeap() << std::endl;
+    LogInfo("Total Heap: " + std::to_string(getTotalHeap()) + "  Free Heap: " + std::to_string(getFreeHeap()));
 #endif
 }
 

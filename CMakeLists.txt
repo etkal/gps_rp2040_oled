@@ -1,3 +1,17 @@
+# == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
+if(WIN32)
+    set(USERHOME $ENV{USERPROFILE})
+else()
+    set(USERHOME $ENV{HOME})
+endif()
+set(sdkVersion 2.3.0)
+set(toolchainVersion 15_2_Rel1)
+set(picotoolVersion 2.3.0)
+set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
+if (EXISTS ${picoVscode})
+    include(${picoVscode})
+endif()
+# ====================================================================================
 cmake_minimum_required(VERSION 3.24)
 
 # Set the board type for pin and LED decisions
@@ -15,7 +29,12 @@ add_compile_definitions(USE_DST=AUTOMATIC)
 # Legacy fallback for simple numeric offsets
 add_compile_definitions(GMT_OFFSET=-4.0)
 
-# Set pico platform definitions for conditional compilation (e.g. VSYS voltage display)
+# Adafruit breakout GPS modules support sending antenna status requests to the GPS device.
+# This is not needed for other modules, but it is mostly harmless to enable it (can cause
+# issues with some GPS modules). If you have issues, comment out the following line.
+add_compile_definitions(SEND_ANTENNA_STATUS_REQUESTS) # Enable sending antenna status requests to the GPS device
+
+# Set pico platform definitions for conditional compilation
 if(PICO_BOARD STREQUAL pico_w OR PICO_BOARD STREQUAL pico2_w)
     add_compile_definitions(PLATFORM_PICO_W)
 endif()
@@ -31,7 +50,8 @@ include(pico_sdk_import.cmake)
 project(gps_oled C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
-set(PICO_CXX_ENABLE_EXCEPTIONS 1)
+set(PICO_CXX_ENABLE_EXCEPTIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
 
 # initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
