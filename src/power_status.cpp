@@ -75,7 +75,7 @@ int power_voltage(float* voltage_result)
 #endif
     // Generate voltage
     const float conversion_factor = 3.3f / (1 << 12);
-    *voltage_result               = vsys * 3 * conversion_factor;
+    *voltage_result = vsys * 3 * conversion_factor;
     return PICO_OK;
 #endif
 }

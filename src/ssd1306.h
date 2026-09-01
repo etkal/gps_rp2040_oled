@@ -94,8 +94,8 @@ public:
     }
 
 private:
-    virtual void initInternal()                      = 0;
-    virtual void write_cmd(uint8_t cmd)              = 0;
+    virtual void initInternal() = 0;
+    virtual void write_cmd(uint8_t cmd) = 0;
     virtual void write_data(uint8_t* buf, uint nLen) = 0;
 
     uint16_t m_dispWidth;
@@ -107,7 +107,14 @@ private:
 class SSD1306_I2C : public SSD1306
 {
 public:
-    SSD1306_I2C(uint nWidth, uint nHeight, i2c_inst_t* i2c, uint8_t addr = 0x3C, bool bExternalVcc = false);
+    SSD1306_I2C(uint nWidth,
+                uint nHeight,
+                i2c_inst_t* i2c,
+                uint sdaPin,
+                uint sclPin,
+                uint baudrate = 400 * 1000,
+                uint8_t addr = 0x3C,
+                bool bExternalVcc = false);
     virtual ~SSD1306_I2C() = default;
 
 private:
@@ -116,5 +123,8 @@ private:
     void write_data(uint8_t* buf, uint nLen) override;
 
     i2c_inst_t* m_i2c;
+    uint m_sdaPin;
+    uint m_sclPin;
+    uint m_baudrate;
     uint8_t m_addr;
 };
