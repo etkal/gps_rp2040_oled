@@ -56,7 +56,7 @@ static std::map<std::string, eSentenceType> g_SentenceTypeMap = {
 namespace
 {
 #if defined(USE_MULTICORE)
-    constexpr uint32_t gpsDataPublishDelayMs = 400; // Still having issues with no delay on multicore with OLED implementation
+    constexpr uint32_t gpsDataPublishDelayMs = 0;
 #else
     constexpr uint32_t gpsDataPublishDelayMs = 400;
 #endif
