@@ -21,21 +21,21 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "gps_oled.h"
 
 #include <stdio.h>
 #include <string>
 #include <iostream>
-#include <pico/double.h>
 #include <math.h>
 #include <iomanip>
 
 #include "pico/stdlib.h"
+#include "pico/double.h"
 #include "pico/multicore.h"
 #include "hardware/gpio.h"
 #include "hardware/uart.h"
 
 #include "ssd1306.h"
-#include "gps_oled.h"
 #include "power_status.h"
 #include "font_factory.h"
 
@@ -67,7 +67,7 @@ GPS_OLED::GPS_OLED(SSD1306::Shared spDisplay, GPS::Shared spGPS, LED::Shared spL
       m_spLED(spLED),
       m_nLastTimeSyncAttemptSec(std::numeric_limits<uint64_t>::max())
 {
-    critical_section_init(&m_GpsDataCallbackCS);
+    queue_init(&m_qGPSData, sizeof(GPSData*), 10); // Initialize the queue with a capacity of 10
 }
 
 GPS_OLED::~GPS_OLED()
@@ -76,7 +76,6 @@ GPS_OLED::~GPS_OLED()
 
 void GPS_OLED::Initialize()
 {
-    m_spDisplay->Reset();
     m_spDisplay->Initialize();
 
     // Initialize display with desired font (best is Terminus 12, anything larger is not recommended)
@@ -85,58 +84,56 @@ void GPS_OLED::Initialize()
     m_spDisplay->SetContrast(0x10);
     showWaitingForGPS();
 
-    m_spGPS->SetSentenceCallback(this, sentenceCB);
     m_spGPS->SetGpsDataCallback(this, gpsDataCB);
+
+    m_spIdleTimer = std::make_shared<AlarmTimer>([this]() {
+        LogInfo("GPS_TFT - No GPS data received showing waiting message");
+        showWaitingForGPS();
+    });
 }
 
 void GPS_OLED::Run()
 {
+#if defined(USE_MULTICORE)
     // Start GPS processing loop on processor core 1
     static auto sm_spGPS = m_spGPS; // Capture shared pointer for use in lambda
     multicore_launch_core1([]() {
         GPS::Shared spGPS = sm_spGPS;
+        // Initialize and run the GPS processing loop on core 1
+        LogInfo("Starting GPS processing on core 1");
         spGPS->Initialize();
         spGPS->Run();
     });
-
-    m_spIdleTimer = std::make_shared<AlarmTimer>([this]() {
-        LogInfo("GPS_OLED - No GPS data received, showing waiting message");
-        showWaitingForGPS();
-    });
+#else
+    // If we are not using multicore, we can run the GPS processing from the display loop
+    LogInfo("Starting GPS processing on core 0");
+    m_spGPS->Initialize();
+#endif // USE_MULTICORE
 
     // Main loop for updating the display
     while (true)
     {
-        busy_wait_ms(10); // Sleep for 10ms to avoid busy waiting
-
+#if !defined(USE_MULTICORE)
+        m_spGPS->RunOnce();
+#endif
         bool bHasQueuedGpsData = false;
         GPSData::Shared spGPSData;
         // Check if we have new GPS data to display, just take the most recent one and discard the rest to avoid UI lag
-        critical_section_enter_blocking(&m_GpsDataCallbackCS);
-        if (!m_qGPSData.empty())
+        while (!queue_is_empty(&m_qGPSData))
         {
+            GPSData* pGPSData = nullptr;
             bHasQueuedGpsData = true;
-            while (!m_qGPSData.empty())
-            {
-                spGPSData = m_qGPSData.front();
-                m_qGPSData.pop();
-            }
+            queue_try_remove(&m_qGPSData, &pGPSData);
+            spGPSData = GPSData::Shared(pGPSData);
         }
-        critical_section_exit(&m_GpsDataCallbackCS);
 
         if (bHasQueuedGpsData && spGPSData)
         {
             LogInfo("GPS_OLED - Updating UI");
-            updateUI(spGPSData);
-            spGPSData.reset();           // Free the data
+            updateUI(std::move(spGPSData));
             m_spIdleTimer->Start(10000); // Reset the idle timer to 10 seconds
         }
     }
-}
-
-void GPS_OLED::sentenceCB(void* pCtx, std::string strSentence)
-{
-    // printf("sentenceCB received: %s\n", strSentence.c_str());
 }
 
 void GPS_OLED::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
@@ -154,10 +151,10 @@ void GPS_OLED::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
     }
 
     // Make a deep copy of the GPSData to avoid issues with shared ownership and data races
-    critical_section_enter_blocking(&pThis->m_GpsDataCallbackCS);
-    GPSData::Shared spGPSDataCopy = std::make_shared<GPSData>(*spGPSData);
-    pThis->m_qGPSData.push(spGPSDataCopy);
-    critical_section_exit(&pThis->m_GpsDataCallbackCS);
+    auto upGPSDataCopy = std::make_unique<GPSData>(*spGPSData);
+
+    GPSData* pGPSDataCopy = upGPSDataCopy.release(); // owned by the queue now
+    queue_try_add(&pThis->m_qGPSData, &pGPSDataCopy);
 }
 
 void GPS_OLED::showWaitingForGPS()
@@ -167,6 +164,7 @@ void GPS_OLED::showWaitingForGPS()
     m_spDisplay->Show();
 }
 
+// Update the UI with the latest GPS data.
 void GPS_OLED::updateUI(GPSData::Shared spGPSData)
 {
     m_spGPSData = spGPSData;
@@ -183,7 +181,7 @@ void GPS_OLED::updateUI(GPSData::Shared spGPSData)
         m_spLED->Blink_ms(20);
     }
 
-    // Update the time if necessary
+    // Update the system time if necessary
     if (!m_spGPSData->strGPSTimeRaw.empty() && !m_spGPSData->strGPSDateRaw.empty())
     {
         const uint64_t uptimeSec = time_us_64() / 1000000;
