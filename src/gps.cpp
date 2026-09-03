@@ -55,7 +55,7 @@ static std::map<std::string, eSentenceType> g_SentenceTypeMap = {
 
 namespace
 {
-    constexpr uint32_t gpsUIUpdateDelayMs = UI_UPDATE_DELAY_MS;
+    constexpr uint32_t gpsSendDataDelayMs = GPS_SEND_DATA_DELAY_MS;
 } // namespace
 
 GPS::GPS()
@@ -158,7 +158,7 @@ void GPS::RunOnce()
     if (m_bSendGpsData)
     {
         m_bSendGpsData = false;
-        m_spSendDataTimer->Start(gpsUIUpdateDelayMs);
+        m_spSendDataTimer->Start(gpsSendDataDelayMs);
     }
 }
 
