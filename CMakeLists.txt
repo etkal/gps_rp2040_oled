@@ -22,7 +22,12 @@ cmake_minimum_required(VERSION 3.24)
 set(PICO_BOARD waveshare_rp2040_zero)
 #set(PICO_BOARD seeed_xiao_rp2040)
 
-add_compile_definitions(USE_MULTICORE) # Enable multicore support for the RP2040
+# Use this to enable multicore support for the RP2040. On some hardware this can improve performance.
+add_compile_definitions(USE_MULTICORE)
+
+# UI update delay for the display (in milliseconds). On some hardware this is necessary in order to
+# keep the display update from interfering with the received UART data (even if on another core).
+add_compile_definitions(UI_UPDATE_DELAY_MS=400)
 
 # Time zone for clock display (examples: UTC, America/New_York, Europe/London)
 add_compile_definitions(TIME_ZONE=\"America/New_York\")
