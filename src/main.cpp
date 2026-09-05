@@ -42,6 +42,10 @@
 #define UART1_DEVICE uart1 // uart1 for echo
 #define PIN_UART1_TX 4
 #define PIN_UART1_RX 5
+#elif defined(PLATFORM_PICO)
+#define UART1_DEVICE uart1 // uart1 for echo
+#define PIN_UART1_TX 8
+#define PIN_UART1_RX 9
 #endif
 
 #define UART_BAUD_RATE 9600
