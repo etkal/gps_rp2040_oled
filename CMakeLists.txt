@@ -27,7 +27,8 @@ add_compile_definitions(USE_MULTICORE)
 
 # GPS data callback delay (in milliseconds). On some hardware this is necessary in order to
 # keep the display update from interfering with the received UART data (even if on another core).
-add_compile_definitions(GPS_SEND_DATA_DELAY_MS=400)
+# Note that after switching from UART IRQ to DMA, this does not seem to be needed.
+add_compile_definitions(GPS_SEND_DATA_DELAY_MS=0)
 
 # Time zone for clock display (examples: UTC, America/New_York, Europe/London)
 add_compile_definitions(TIME_ZONE=\"America/New_York\")
@@ -108,6 +109,7 @@ target_link_libraries(gps_oled
     hardware_gpio
     hardware_pio
     hardware_i2c
+    hardware_dma
     power_status_adc
     pico_aon_timer
     pico_multicore
