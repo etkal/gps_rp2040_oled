@@ -62,6 +62,7 @@ public:
           strGPSTime(rhs.strGPSTime),
           strMode3D(rhs.strMode3D),
           strSpeed(rhs.strSpeed),
+          strVsys(rhs.strVsys),
           mSatList(rhs.mSatList),
           vUsedList(rhs.vUsedList)
     {
@@ -80,6 +81,7 @@ public:
     std::string strGPSTime;    // Formatted GPS time string in HH:MM:SSZ format
     std::string strMode3D;
     std::string strSpeed;
+    std::string strVsys;
     SatList mSatList;
     UsedList vUsedList;
 };

@@ -87,14 +87,13 @@ void GPS_OLED::Initialize()
     m_spGPS->SetGpsDataCallback(this, gpsDataCB);
 
     m_spIdleTimer = std::make_shared<AlarmTimer>([this]() {
-        LogInfo("GPS_TFT - No GPS data received showing waiting message");
-        showWaitingForGPS();
+        m_bShowWaitingForGPS = true;
     });
 }
 
 void GPS_OLED::Run()
 {
-#if defined(USE_MULTICORE)
+#if defined(GPS_ON_CORE_1)
     // Start GPS processing loop on processor core 1
     static auto sm_spGPS = m_spGPS; // Capture shared pointer for use in lambda
     multicore_launch_core1([]() {
@@ -108,12 +107,25 @@ void GPS_OLED::Run()
     // If we are not using multicore, we can run the GPS processing from the display loop
     LogInfo("Starting GPS processing on core 0");
     m_spGPS->Initialize();
-#endif // USE_MULTICORE
+#endif // GPS_ON_CORE_1
+
+#if defined(DISPLAY_ON_CORE_1)
+    static auto sm_pThis = this; // Capture pointer for use in lambda
+    multicore_launch_core1([]() {
+        GPS_OLED* pThis = sm_pThis;
+        while (true)
+        {
+            multicore_fifo_pop_blocking(); // Wait for signal from core 0
+            pThis->updateUI();
+        }
+    });
+#endif
 
     // Main loop for updating the display
     while (true)
     {
-#if !defined(USE_MULTICORE)
+        m_spLED->CheckForWork();
+#if !defined(GPS_ON_CORE_1)
         m_spGPS->RunOnce();
 #endif
         bool bHasQueuedGpsData = false;
@@ -130,8 +142,22 @@ void GPS_OLED::Run()
         if (bHasQueuedGpsData && spGPSData)
         {
             LogInfo("GPS_OLED - Updating UI");
-            updateUI(std::move(spGPSData));
+            m_spGPSData = std::move(spGPSData);
+            blinkLED();
+            updateTime();
+            getVsysVoltage();
+#if defined(DISPLAY_ON_CORE_1)
+            multicore_fifo_push_blocking(0);
+#else
+            updateUI();
+#endif
             m_spIdleTimer->Start(10000); // Reset the idle timer to 10 seconds
+        }
+        if (m_bShowWaitingForGPS)
+        {
+            LogInfo("GPS_OLED - No GPS data received showing waiting message");
+            showWaitingForGPS();
+            m_bShowWaitingForGPS = false;
         }
     }
 }
@@ -160,14 +186,12 @@ void GPS_OLED::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
 void GPS_OLED::showWaitingForGPS()
 {
     m_spDisplay->Fill(COLOUR_BLACK);
-    drawText(0, "Waiting for GPS", COLOUR_WHITE, false, 0);
+    drawText(0, "Waiting for GPS data", COLOUR_WHITE, false, 0);
     m_spDisplay->Show();
 }
 
-// Update the UI with the latest GPS data.
-void GPS_OLED::updateUI(GPSData::Shared spGPSData)
+void GPS_OLED::blinkLED()
 {
-    m_spGPSData = spGPSData;
     if (m_spLED)
     {
         if (m_spGPSData->bHasPosition)
@@ -180,7 +204,10 @@ void GPS_OLED::updateUI(GPSData::Shared spGPSData)
         }
         m_spLED->Blink_ms(20);
     }
+}
 
+void GPS_OLED::updateTime()
+{
     // Update the system time if necessary
     if (!m_spGPSData->strGPSTimeRaw.empty() && !m_spGPSData->strGPSDateRaw.empty())
     {
@@ -203,17 +230,11 @@ void GPS_OLED::updateUI(GPSData::Shared spGPSData)
             }
         }
     }
+}
 
-    uint16_t nWidth = m_spDisplay->Width();
-    uint16_t nHeight = m_spDisplay->Height();
-
-    // Compute padding dynamically from font dimensions
-    constexpr uint PAD_CHARS_X = 0;
-    // constexpr uint PAD_CHARS_Y = 0;
-    uint X_PAD = PAD_CHARS_X * getCharWidth();
-    // uint Y_PAD = PAD_CHARS_Y * (getCharHeight() + 1);
-
-#if defined(PLATFORM_PICO)
+void GPS_OLED::getVsysVoltage()
+{
+#if defined(PLATFORM_PICO) // Only the Raspberry Pi Pico have a VSYS voltage monitor
     float vsys = 0.0;
     bool bBattery = false;
     std::string strVsys;
@@ -225,7 +246,22 @@ void GPS_OLED::updateUI(GPSData::Shared spGPSData)
         oss << (bBattery ? "b:" : "") << std::fixed << std::setfill(' ') << std::setprecision(1) << vsys << "V";
         strVsys = oss.str();
     }
+    m_spGPSData->strVsys = strVsys;
 #endif
+}
+
+// Update the UI with the latest GPS data.
+void GPS_OLED::updateUI()
+{
+    LogInfo("GPS_OLED - updateUI() called");
+    uint16_t nWidth = m_spDisplay->Width();
+    uint16_t nHeight = m_spDisplay->Height();
+
+    // Compute padding dynamically from font dimensions
+    constexpr uint PAD_CHARS_X = 0;
+    // constexpr uint PAD_CHARS_Y = 0;
+    uint X_PAD = PAD_CHARS_X * getCharWidth();
+    // uint Y_PAD = PAD_CHARS_Y * (getCharHeight() + 1);
 
     m_spDisplay->Fill(COLOUR_BLACK);
 
@@ -233,35 +269,33 @@ void GPS_OLED::updateUI(GPSData::Shared spGPSData)
     drawSatGrid(nWidth / 4, nHeight / 2, nHeight / 2 - getCharHeight() / 2, 2);
 
     // Draw fix and #sats text
-    drawText(0, spGPSData->strMode3D + (m_spGPSData->bExternalAntenna ? "*" : ""), COLOUR_WHITE, false, X_PAD);
-    drawText(3, spGPSData->strNumSats, COLOUR_WHITE, true, X_PAD);
+    drawText(0, m_spGPSData->strMode3D + (m_spGPSData->bExternalAntenna ? "*" : ""), COLOUR_WHITE, false, X_PAD);
+    drawText(3, m_spGPSData->strNumSats, COLOUR_WHITE, true, X_PAD);
 
-    if (!spGPSData->strLatitude.empty())
+    if (!m_spGPSData->strLatitude.empty())
     {
-        drawText(0, spGPSData->strLatitude, COLOUR_WHITE, true, X_PAD);
-        drawText(1, spGPSData->strLongitude, COLOUR_WHITE, true, X_PAD);
-        drawText(2, spGPSData->strAltitude, COLOUR_WHITE, true, X_PAD);
+        drawText(0, m_spGPSData->strLatitude, COLOUR_WHITE, true, X_PAD);
+        drawText(1, m_spGPSData->strLongitude, COLOUR_WHITE, true, X_PAD);
+        drawText(2, m_spGPSData->strAltitude, COLOUR_WHITE, true, X_PAD);
         if (getCharHeight() <= 12) // only if room
         {
-            drawText(4, spGPSData->strSpeed, COLOUR_WHITE, true, X_PAD);
+            drawText(4, m_spGPSData->strSpeed, COLOUR_WHITE, true, X_PAD);
         }
     }
-    if (!spGPSData->strGPSTime.empty())
+    if (!m_spGPSData->strGPSTime.empty())
     {
-        drawText(-1, spGPSData->strGPSTime, COLOUR_WHITE, true, X_PAD);
+        drawText(-1, m_spGPSData->strGPSTime, COLOUR_WHITE, true, X_PAD);
     }
 
 #if defined(PLATFORM_PICO)
-    if (!strVsys.empty() && getCharHeight() <= 8) // only if room
+    if (!m_spGPSData->strVsys.empty() && getCharHeight() <= 8) // only if room
     {
-        drawText(-2, strVsys, COLOUR_WHITE, true, X_PAD);
+        drawText(-2, m_spGPSData->strVsys, COLOUR_WHITE, true, X_PAD);
     }
 #endif
 
     // blit the framebuf to the display
     m_spDisplay->Show();
-
-    m_spGPSData.reset();
 
 #if !defined(NDEBUG)
     LogInfo("Total Heap: " + std::to_string(getTotalHeap()) + "  Free Heap: " + std::to_string(getFreeHeap()));

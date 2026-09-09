@@ -45,7 +45,10 @@ private:
     static void gpsDataCB(void* pCtx, GPSData::Shared spGPSData);
 
     void showWaitingForGPS();
-    void updateUI(GPSData::Shared spGPSData);
+    void blinkLED();
+    void updateTime();
+    void getVsysVoltage();
+    void updateUI();
     void drawSatGrid(uint xCenter, uint yCenter, uint radius, uint nRings = 3);
     // void drawBarGraph(uint x, uint y, uint width, uint height);
     // void drawClock(uint x, uint y, uint radius, std::string strTime);
@@ -95,4 +98,5 @@ private:
     uint64_t m_nLastTimeSyncAttemptSec;
     queue_t m_qGPSData; // Queue of GPS data to be processed by the display loop
     AlarmTimer::Shared m_spIdleTimer;     // Timer to detect lack of GPS data
+    bool m_bShowWaitingForGPS {false};
 };

@@ -11,6 +11,7 @@
 #include "pico/cyw43_arch.h"
 #endif
 #include "ws2812.pio.h"
+#include "timemgr.h"
 
 static inline void put_pixel(uint32_t pixel_grb)
 {
@@ -18,10 +19,10 @@ static inline void put_pixel(uint32_t pixel_grb)
 }
 
 // Use repeating_timer to avoid hangs in sleep_ms with pico_w
-static bool ledTimerCallback(repeating_timer_t* pTimer)
+bool LED::ledOffTimerCallback(repeating_timer_t* pTimer)
 {
     LED* pThis = reinterpret_cast<LED*>(pTimer->user_data);
-    pThis->Off();
+    pThis->m_bTurnLedOff = true;
     return false; // cancels
 }
 
@@ -33,9 +34,17 @@ LED::~LED()
 void LED::Blink_ms(uint duration, uint32_t color)
 {
     On();
-    add_repeating_timer_ms(duration, ledTimerCallback, reinterpret_cast<void*>(this), &m_LedTimer);
+    add_repeating_timer_ms(duration, LED::ledOffTimerCallback, reinterpret_cast<void*>(this), &m_LedTimer);
 }
 
+void LED::CheckForWork()
+{
+    if (m_bTurnLedOff)
+    {
+        Off();
+        m_bTurnLedOff = false;
+    }
+}
 
 LED_pico::LED_pico(uint pin)
     : m_nPin(pin),
@@ -113,8 +122,15 @@ LED_neo::~LED_neo()
 void LED_neo::Initialize()
 {
     PIO pio = pio0;
-    int sm = 0;
-    uint offset = pio_add_program(pio, &ws2812_program);
+    uint sm = 0;
+    uint offset = 0;
+
+    if (!pio_claim_free_sm_and_add_program(&ws2812_program, &pio, &sm, &offset))
+    {
+        LogInfo("Failed to claim PIO state machine and add WS2812 program");
+        panic("Failed to claim PIO state machine and add WS2812 program");
+    }
+
     ws2812_program_init(pio, sm, offset, m_nPin, 800000, m_bIsRGBW);
 
     if (0 != m_nPowerPin)
@@ -174,11 +190,15 @@ void LED_pico_w::On()
             return;
         }
     }
+    cyw43_thread_enter();
     cyw43_arch_gpio_put(m_nPin, 1);
+    cyw43_thread_exit();
 }
 
 void LED_pico_w::Off()
 {
+    cyw43_thread_enter();
     cyw43_arch_gpio_put(m_nPin, 0);
+    cyw43_thread_exit();
 }
 #endif
