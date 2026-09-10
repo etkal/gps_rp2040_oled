@@ -154,7 +154,7 @@ void GPS_UART::Initialize()
         2000,
         30000,
         [this]() {
-            sendExternalAntennaStatusRequest();
+            m_bSendExternalAntennaStatusRequest = true;
         },
         m_pAlarmPool);
     m_spSendAntennaStatusTimer->Start();
@@ -256,5 +256,15 @@ bool GPS_UART::getSentence(std::string& strSentence)
             bFound = true;
         }
     }
+
+#if defined(SEND_ANTENNA_STATUS_REQUESTS)
+    // Check if we are supposed to send antenna status request commands
+    if (m_bSendExternalAntennaStatusRequest)
+    {
+        sendExternalAntennaStatusRequest();
+        m_bSendExternalAntennaStatusRequest = false;
+    }
+#endif
+
     return bFound;
 }

@@ -67,6 +67,7 @@ private:
 
 #if defined(SEND_ANTENNA_STATUS_REQUESTS)
     DelayedRepeatingTimer::Shared m_spSendAntennaStatusTimer;
+    bool m_bSendExternalAntennaStatusRequest {false};
 #endif
 
     // RX management (circular DMA buffer)

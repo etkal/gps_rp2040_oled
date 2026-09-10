@@ -60,9 +60,12 @@ public:
     virtual void SetPixel(uint idx, uint32_t color) = 0;
     virtual void SetIgnore(std::vector<uint32_t> vIgnore) {};
     void Blink_ms(uint duration = 50, uint32_t color = led_white);
+    void CheckForWork();
 
 protected:
     repeating_timer_t m_LedTimer {};
+    bool m_bTurnLedOff {false};
+    static bool ledOffTimerCallback(repeating_timer_t* pTimer);
 };
 
 class LED_pico : public LED

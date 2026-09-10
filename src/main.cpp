@@ -34,9 +34,13 @@
 #include "gps_uart.h"
 #include "timemgr.h"
 
-#define UART0_DEVICE uart0                    // Default is uart0
-#define PIN_UART0_TX PICO_DEFAULT_UART_TX_PIN // Default is 0
-#define PIN_UART0_RX PICO_DEFAULT_UART_RX_PIN // Default is 1
+#if defined(GPS_ON_CORE_1) && defined(DISPLAY_ON_CORE_1)
+#error "GPS_ON_CORE_1 and DISPLAY_ON_CORE_1 cannot both be defined"
+#endif
+
+#define UART0_DEVICE uart0 // Default is uart0
+#define PIN_UART0_TX 0     // Default is 0
+#define PIN_UART0_RX 1     // Default is 1
 
 #if defined(WAVESHARE_RP2040_ZERO)
 #define UART1_DEVICE uart1 // uart1 for echo
@@ -82,7 +86,16 @@ int main()
     adc_init();
 
 #if !defined(NDEBUG)
+    timer_hw->dbgpause = 0;
     sleep_ms(5000);
+#endif
+
+#if defined(PLATFORM_PICO_W)
+    if (cyw43_arch_init())
+    {
+        std::cout << "Failed to initialize cyw43 hardware" << std::endl;
+        return 1;
+    }
 #endif
 
     TimeMgr::InitializeSingleton(TIME_ZONE); // Needed for logging timestamps
@@ -93,10 +106,6 @@ int main()
     LED_pico ledBlue(25);  // blue
     LED_pico ledGreen(16); // green
     LED_pico ledRed(17);   // red
-#endif
-
-#if defined(PLATFORM_PICO_W)
-    cyw43_arch_init();
 #endif
 
     // Create the LED object

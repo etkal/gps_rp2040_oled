@@ -130,7 +130,7 @@ void GPS::Initialize()
     // we will clear the GPS data object so as to invalidate position information, etc.
     m_spIdleTimer = std::make_shared<AlarmTimer>(
         [this]() {
-            LogInfo("GPS - No GPS data received, clearing GPS data");
+            // LogInfo("GPS - No GPS data received, clearing GPS data");
             m_spGPSData.reset();
         },
         m_pAlarmPool);

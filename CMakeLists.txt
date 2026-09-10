@@ -22,8 +22,12 @@ cmake_minimum_required(VERSION 3.24)
 set(PICO_BOARD waveshare_rp2040_zero)
 #set(PICO_BOARD seeed_xiao_rp2040)
 
-# Use this to enable multicore support for the RP2040. On some hardware this can improve performance.
-add_compile_definitions(USE_MULTICORE)
+# Run the GPS processing on the second core if desired. The gpsmon implementation cannot
+# utilize this as the wifi stack uses the primary core.
+#add_compile_definitions(GPS_ON_CORE_1)
+
+# Run the display on the second core. Alternative for the above.
+add_compile_definitions(DISPLAY_ON_CORE_1)
 
 # GPS data callback delay (in milliseconds). On some hardware this is necessary in order to
 # keep the display update from interfering with the received UART data (even if on another core).
