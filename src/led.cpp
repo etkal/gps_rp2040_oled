@@ -123,14 +123,7 @@ void LED_neo::Initialize()
 {
     PIO pio = pio0;
     uint sm = 0;
-    uint offset = 0;
-
-    if (!pio_claim_free_sm_and_add_program(&ws2812_program, &pio, &sm, &offset))
-    {
-        LogInfo("Failed to claim PIO state machine and add WS2812 program");
-        panic("Failed to claim PIO state machine and add WS2812 program");
-    }
-
+    uint offset = pio_add_program(pio, &ws2812_program);
     ws2812_program_init(pio, sm, offset, m_nPin, 800000, m_bIsRGBW);
 
     if (0 != m_nPowerPin)
