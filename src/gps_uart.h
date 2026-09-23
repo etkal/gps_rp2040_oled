@@ -43,7 +43,7 @@ private:
     virtual bool getSentence(std::string& strSentence) override;
 
     // Send commands to report external antenna status.
-#if defined(SEND_ANTENNA_STATUS_REQUESTS)
+#if defined(ANTENNA_STATUS_REQUEST_REPEAT)
     void sendExternalAntennaStatusRequest();
 #endif
 
@@ -65,7 +65,7 @@ private:
     uart_parity_t m_parity_out {UART_PARITY_NONE};
     uint m_baudrate_out {0};
 
-#if defined(SEND_ANTENNA_STATUS_REQUESTS)
+#if defined(ANTENNA_STATUS_REQUEST_REPEAT)
     DelayedRepeatingTimer::Shared m_spSendAntennaStatusTimer;
     bool m_bSendExternalAntennaStatusRequest {false};
 #endif

@@ -58,6 +58,20 @@ namespace
     constexpr uint32_t gpsSendDataDelayMs = GPS_SEND_DATA_DELAY_MS;
 } // namespace
 
+static std::string formatDouble(double dValue, std::string strUnit)
+{
+    std::ostringstream oss;
+    if (dValue < 10.0)
+    {
+        oss << std::fixed << std::setfill(' ') << std::setprecision(1) << dValue << strUnit;
+    }
+    else
+    {
+        oss << std::setfill(' ') << std::setprecision(0) << dValue << strUnit;
+    }
+    return oss.str();
+}
+
 GPS::GPS()
 {
 }
@@ -268,20 +282,17 @@ bool GPS::processSentence(std::string strSentence)
         if (!vElems[9].empty())
         {
             double dMeters = std::stod(vElems[9].c_str());
-            std::stringstream oss;
-            if (dMeters < 1000.0)
-            {
-                oss << std::fixed << std::setfill(' ') << std::setprecision(1) << dMeters << "m";
-            }
-            else
-            {
-                oss << std::setfill(' ') << std::setprecision(0) << dMeters << "m";
-            }
-            m_spGPSData->strAltitude = oss.str();
+#if defined(OBSCURE_LOCATION)
+            dMeters = 1064.0;
+#endif
+            double dFeet = dMeters * 3.28084;
+            m_spGPSData->strAltitude = formatDouble(dMeters, " m");
+            m_spGPSData->strAltitudeFeet = formatDouble(dFeet, " ft");
         }
         else
         {
             m_spGPSData->strAltitude = "";
+            m_spGPSData->strAltitudeFeet = "";
         }
         break;
     }
@@ -377,23 +388,22 @@ bool GPS::processSentence(std::string strSentence)
             if (!vElems[3].empty() && !vElems[4].empty() && !vElems[5].empty() && !vElems[6].empty())
             {
                 m_spGPSData->bHasPosition = true;
-                m_spGPSData->strLatitude = convertToDegrees(vElems[3], 7) + vElems[4];
-                m_spGPSData->strLongitude = convertToDegrees(vElems[5], 8) + vElems[6];
+                m_spGPSData->strLatitude = convertToDegrees(vElems[3], 7) + " " + vElems[4];
+                m_spGPSData->strLongitude = convertToDegrees(vElems[5], 8) + " " + vElems[6];
+#if defined(OBSCURE_LOCATION)
+                m_spGPSData->strLatitude = "42.6373 N";
+                m_spGPSData->strLongitude = "73.1659 W";
+#endif
             }
             if (!vElems[7].empty())
             {
                 double dKnots = std::stod(vElems[7].c_str());
                 double dMph = dKnots * 1.15078;
-                std::stringstream oss;
-                if (dMph < 10.0)
-                {
-                    oss << std::fixed << std::setfill(' ') << std::setprecision(1) << dMph << "mph";
-                }
-                else
-                {
-                    oss << std::setfill(' ') << std::setprecision(0) << dMph << "mph";
-                }
-                m_spGPSData->strSpeed = oss.str();
+                double dKph = dKnots * 1.852;
+                m_spGPSData->strSpeed = formatDouble(dMph, " mph");
+                m_spGPSData->strSpeedKts = formatDouble(dKnots, " kts");
+                m_spGPSData->strSpeedKph = formatDouble(dKph, " kph");
+                m_spGPSData->strSpeedMph = formatDouble(dMph, " mph");
             }
         }
         else

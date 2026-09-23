@@ -70,6 +70,9 @@
 // #define USE_WS2812_PIN 12 // Override
 // #define USE_LED_PIN 16    // Override
 
+// GPIO pin for a button
+#define PIN_BUTTON 6
+
 extern "C"
 {
     int _getentropy(void* buffer, size_t length)
@@ -132,6 +135,13 @@ int main()
     spLED->SetIgnore({led_red, led_magenta});
 #endif
 
+    // Create the button object
+    Button::Shared spButton;
+#if defined(PIN_BUTTON)
+    spButton = std::make_shared<Button>(PIN_BUTTON);
+    spButton->Initialize();
+#endif
+
     LogInfo("Creating GPS object...");
 
     // Create the GPS object
@@ -146,7 +156,7 @@ int main()
     SSD1306::Shared spDisplay = std::make_shared<SSD1306_I2C>(128, 64, I2C_DEVICE, PIN_SDA, PIN_SCL);
 
     // Create the GPS_OLED display object
-    GPS_OLED::Shared spDevice = std::make_shared<GPS_OLED>(spDisplay, spGPS, spLED);
+    GPS_OLED::Shared spDevice = std::make_shared<GPS_OLED>(spDisplay, spGPS, spLED, spButton);
 
     spDevice->Initialize();
     // Run the show

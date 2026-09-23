@@ -56,12 +56,16 @@ public:
           strLatitude(rhs.strLatitude),
           strLongitude(rhs.strLongitude),
           strAltitude(rhs.strAltitude),
+          strAltitudeFeet(rhs.strAltitudeFeet),
           strNumSats(rhs.strNumSats),
           strGPSTimeRaw(rhs.strGPSTimeRaw),
           strGPSDateRaw(rhs.strGPSDateRaw),
           strGPSTime(rhs.strGPSTime),
           strMode3D(rhs.strMode3D),
           strSpeed(rhs.strSpeed),
+          strSpeedKts(rhs.strSpeedKts),
+          strSpeedKph(rhs.strSpeedKph),
+          strSpeedMph(rhs.strSpeedMph),
           strVsys(rhs.strVsys),
           mSatList(rhs.mSatList),
           vUsedList(rhs.vUsedList)
@@ -75,12 +79,16 @@ public:
     std::string strLatitude;
     std::string strLongitude;
     std::string strAltitude;
+    std::string strAltitudeFeet;
     std::string strNumSats;
     std::string strGPSTimeRaw; // Raw GPS time in HHMMSS format
     std::string strGPSDateRaw; // Raw GPS date in DDMMYY format
     std::string strGPSTime;    // Formatted GPS time string in HH:MM:SSZ format
     std::string strMode3D;
     std::string strSpeed;
+    std::string strSpeedKts;
+    std::string strSpeedKph;
+    std::string strSpeedMph;
     std::string strVsys;
     SatList mSatList;
     UsedList vUsedList;

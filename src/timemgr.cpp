@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -460,6 +461,72 @@ namespace
     }
 #endif
 
+    std::string resolve_timezone_abbreviation(const std::string& lowerZone, bool isDst)
+    {
+        if (lowerZone == "utc")
+        {
+            return "UTC";
+        }
+        if (lowerZone == "gmt")
+        {
+            return "GMT";
+        }
+        if (lowerZone == "america/new_york" || lowerZone == "america/toronto" || lowerZone == "america/halifax")
+        {
+            return isDst ? "EDT" : "EST";
+        }
+        if (lowerZone == "america/chicago" || lowerZone == "america/mexico_city")
+        {
+            return isDst ? "CDT" : "CST";
+        }
+        if (lowerZone == "america/denver")
+        {
+            return isDst ? "MDT" : "MST";
+        }
+        if (lowerZone == "america/los_angeles" || lowerZone == "america/vancouver")
+        {
+            return isDst ? "PDT" : "PST";
+        }
+        if (lowerZone == "america/phoenix")
+        {
+            return "MST";
+        }
+        if (lowerZone == "europe/london" || lowerZone == "europe/ireland" || lowerZone == "europe/dublin")
+        {
+            return isDst ? "BST" : "GMT";
+        }
+        if (lowerZone == "europe/paris" || lowerZone == "europe/berlin" || lowerZone == "europe/amsterdam" ||
+            lowerZone == "europe/rome" || lowerZone == "europe/madrid")
+        {
+            return isDst ? "CEST" : "CET";
+        }
+        if (lowerZone == "asia/tokyo")
+        {
+            return "JST";
+        }
+        if (lowerZone == "asia/seoul")
+        {
+            return "KST";
+        }
+        if (lowerZone == "asia/shanghai")
+        {
+            return "CST";
+        }
+        if (lowerZone == "asia/hong_kong")
+        {
+            return "HKT";
+        }
+        if (lowerZone == "asia/kolkata")
+        {
+            return "IST";
+        }
+        if (lowerZone == "australia/sydney" || lowerZone == "australia/melbourne")
+        {
+            return isDst ? "AEDT" : "AEST";
+        }
+        return "";
+    }
+
     std::string format_uptime_timestamp()
     {
         const uint64_t nowUs = time_us_64();
@@ -715,18 +782,22 @@ std::string TimeMgr::FormatCurrentTimestamp()
 
 std::string TimeMgr::FormatCurrentTimeHMS()
 {
-    if (!IsWallClockValid())
-    {
-        return "";
-    }
+    return GetInstance()->formatCurrentTimeHMS();
+}
 
-    const std::time_t now = std::time(nullptr);
-    std::tm tmNow {};
-    localtime_r(&now, &tmNow);
+std::string TimeMgr::FormatCurrentTimeUTC()
+{
+    return GetInstance()->formatCurrentTimeUTC();
+}
 
-    char buf[32] = {0};
-    std::strftime(buf, sizeof(buf), "%H:%M:%S", &tmNow);
-    return std::string(buf);
+std::string TimeMgr::FormatCurrentDate()
+{
+    return GetInstance()->formatCurrentDate();
+}
+
+std::string TimeMgr::FormatCurrentDateUTC()
+{
+    return GetInstance()->formatCurrentDateUTC();
 }
 
 void TimeMgr::LogInfo(const std::string& message)
@@ -740,6 +811,7 @@ void TimeMgr::LogInfo(const std::string& message)
 
 TimeMgr::TimeMgr(std::string timeZoneName)
     : m_timeZoneName(std::move(timeZoneName)),
+      m_timeZoneAbbrev(),
       m_timeZoneOffsetHours(0.0f),
       m_isDst(false),
       m_hasTimeZoneOffset(false)
@@ -901,6 +973,12 @@ bool TimeMgr::setTimeFromGps(const std::string& gpsTime, const std::string& gpsD
     }
 
     const std::time_t gpsUtc = utc_time_from_ymdhms(year, month, day, hour, minute, second);
+    if (gpsUtc < static_cast<std::time_t>(validEpochThresholdSec))
+    {
+        LogInfo("Input GPS time is not valid");
+        return false;
+    }
+
     timeval tv {};
     tv.tv_sec = gpsUtc;
     tv.tv_usec = 0;
@@ -935,6 +1013,7 @@ bool TimeMgr::refreshTimeZoneOffset(std::time_t whenUtc)
 
     m_timeZoneOffsetHours = offsetHours;
     m_isDst = isDst;
+    m_timeZoneAbbrev = resolve_timezone_abbreviation(to_lower_copy(trim_copy(m_timeZoneName)), isDst);
     m_hasTimeZoneOffset = true;
     return true;
 }
@@ -964,9 +1043,81 @@ const std::string& TimeMgr::timeZoneName() const
     return m_timeZoneName;
 }
 
+std::string TimeMgr::formatCurrentTimeHMS() const
+{
+    if (!IsWallClockValid())
+    {
+        return "";
+    }
+
+    const std::time_t nowUtc = std::time(nullptr);
+    const std::time_t localTime = nowUtc + static_cast<std::time_t>(std::lround(m_timeZoneOffsetHours * 3600.0f));
+    std::tm tmLocal {};
+    gmtime_r(&localTime, &tmLocal);
+
+    char buf[32] = {0};
+    std::strftime(buf, sizeof(buf), "%H:%M:%S", &tmLocal);
+    std::string result(buf);
+    if (!m_timeZoneAbbrev.empty())
+    {
+        result += " " + m_timeZoneAbbrev;
+    }
+    return result;
+}
+
+std::string TimeMgr::formatCurrentTimeUTC() const
+{
+    if (!IsWallClockValid())
+    {
+        return "";
+    }
+
+    const std::time_t nowUtc = std::time(nullptr);
+    std::tm tmUtc {};
+    gmtime_r(&nowUtc, &tmUtc);
+
+    char buf[32] = {0};
+    std::strftime(buf, sizeof(buf), "%H:%M:%S", &tmUtc);
+    return std::string(buf);
+}
+
+std::string TimeMgr::formatCurrentDate() const
+{
+    if (!IsWallClockValid())
+    {
+        return "";
+    }
+
+    const std::time_t nowUtc = std::time(nullptr);
+    const std::time_t localTime = nowUtc + static_cast<std::time_t>(std::lround(m_timeZoneOffsetHours * 3600.0f));
+    std::tm tmLocal {};
+    gmtime_r(&localTime, &tmLocal);
+
+    char buf[16] = {0};
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d", &tmLocal);
+    return std::string(buf);
+}
+
+std::string TimeMgr::formatCurrentDateUTC() const
+{
+    if (!IsWallClockValid())
+    {
+        return "";
+    }
+
+    const std::time_t nowUtc = std::time(nullptr);
+    std::tm tmUtc {};
+    gmtime_r(&nowUtc, &tmUtc);
+
+    char buf[16] = {0};
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d", &tmUtc);
+    return std::string(buf);
+}
+
 void TimeMgr::setTimeZoneName(std::string timeZoneName)
 {
     m_timeZoneName = std::move(timeZoneName);
+    m_timeZoneAbbrev.clear();
     m_timeZoneOffsetHours = 0.0f;
     m_isDst = false;
     m_hasTimeZoneOffset = false;

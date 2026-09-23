@@ -37,6 +37,9 @@ public:
     static bool IsGpsTimeDateWithinOneSecond(const std::string& gpsTime, const std::string& gpsDate);
     static std::string FormatCurrentTimestamp();
     static std::string FormatCurrentTimeHMS();
+    static std::string FormatCurrentTimeUTC();
+    static std::string FormatCurrentDate();
+    static std::string FormatCurrentDateUTC();
     static void LogInfo(const std::string& message);
 
     static bool SetTimeFromNtp(uint32_t timeoutMs = 10000);
@@ -61,10 +64,15 @@ private:
     bool isDst() const;
     const std::string& timeZoneName() const;
     void setTimeZoneName(std::string timeZoneName);
+    std::string formatCurrentTimeHMS() const;
+    std::string formatCurrentTimeUTC() const;
+    std::string formatCurrentDate() const;
+    std::string formatCurrentDateUTC() const;
 
     static Shared sm_spTimeMgr;
 
     std::string m_timeZoneName;
+    std::string m_timeZoneAbbrev;
     float m_timeZoneOffsetHours;
     bool m_isDst;
     bool m_hasTimeZoneOffset;

@@ -26,11 +26,15 @@ auto constexpr LED_OFF = 0;
 #define WS2812_POWER_PIN 0
 #endif
 
-auto constexpr max_lum = 100;
+auto constexpr max_lum = 20;
 
 static inline constexpr uint32_t urgb_u32(uint8_t r, uint8_t g, uint8_t b)
 {
-    return ((uint32_t)(r * max_lum / 256) << 8) | ((uint32_t)(g * max_lum / 256) << 16) | (uint32_t)(b * max_lum / 256);
+#if defined(WS2812_LED_IS_RGB)
+    return (((uint32_t)(r * max_lum / 256) << 16) | (uint32_t)(g * max_lum / 256) << 8) | (uint32_t)(b * max_lum / 256);
+#else
+    return (((uint32_t)(g * max_lum / 256) << 16) | (uint32_t)(r * max_lum / 256) << 8) | (uint32_t)(b * max_lum / 256);
+#endif
 }
 
 auto constexpr led_white = urgb_u32(0x80, 0x80, 0x80);
