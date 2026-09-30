@@ -1,4 +1,5 @@
 target_sources(gps_oled PUBLIC
+    button.cpp
     font/font_factory.cpp
     framebuf.cpp
     gps_oled.cpp

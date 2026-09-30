@@ -8,7 +8,7 @@ set(sdkVersion 2.3.0)
 set(toolchainVersion 15_2_Rel1)
 set(picotoolVersion 2.3.0)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
-if (EXISTS ${picoVscode})
+if(EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
@@ -21,6 +21,9 @@ cmake_minimum_required(VERSION 3.24)
 #set(PICO_BOARD pico2_w)
 set(PICO_BOARD waveshare_rp2040_zero)
 #set(PICO_BOARD seeed_xiao_rp2040)
+
+# Some LED modules use RGB ordering for the WS2812 LEDs
+add_compile_definitions(WS2812_LED_IS_RGB)
 
 # Run the GPS processing on the second core if desired. The gpsmon implementation cannot
 # utilize this as the wifi stack uses the primary core.
@@ -43,10 +46,15 @@ add_compile_definitions(GMT_OFFSET=-4.0)
 # Adafruit breakout GPS modules support sending antenna status requests to the GPS device.
 # This is not needed for other modules, but it is mostly harmless to enable it (can cause
 # issues with some GPS modules). If you have issues, comment out the following line.
-add_compile_definitions(SEND_ANTENNA_STATUS_REQUESTS) # Enable sending antenna status requests to the GPS device
+# setting to 0 indicates not to repeat, only send once (after a delay), any other value
+# repeats at that interval (in seconds).
+add_compile_definitions(ANTENNA_STATUS_REQUEST_REPEAT=0)
 
 # Enable display of vsys voltage and power source. Note: incorrect on Pico 2 (non-W variant)
 #add_compile_definitions(DISPLAY_VSYS_VOLTAGE)
+
+# Privacy: obscure the location information in the GPS data
+#add_compile_definitions(OBSCURE_LOCATION)
 
 # Set pico platform definitions for conditional compilation
 if(PICO_BOARD STREQUAL pico_w OR PICO_BOARD STREQUAL pico2_w)

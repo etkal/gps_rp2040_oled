@@ -148,13 +148,16 @@ void GPS_UART::Initialize()
                           0xFFFFFFFF,                  // effectively never stop; ring mode wraps the address
                           true);                       // start immediately
 
-#if defined(SEND_ANTENNA_STATUS_REQUESTS)
-    // Set up a timer to send antenna status commands to the GPS device every 30 seconds, starting after 2 seconds.
+#if defined(ANTENNA_STATUS_REQUEST_REPEAT)
+    // Set up a timer to send antenna status commands to the GPS device periodically, starting after 5 seconds.
     m_spSendAntennaStatusTimer = std::make_shared<DelayedRepeatingTimer>(
-        2000,
-        30000,
+        5000,
+        ANTENNA_STATUS_REQUEST_REPEAT * 1000,
         [this]() {
             m_bSendExternalAntennaStatusRequest = true;
+#if ANTENNA_STATUS_REQUEST_REPEAT == 0
+            m_spSendAntennaStatusTimer->Stop(); // Stop the timer if the repeat interval is 0
+#endif
         },
         m_pAlarmPool);
     m_spSendAntennaStatusTimer->Start();
@@ -257,7 +260,7 @@ bool GPS_UART::getSentence(std::string& strSentence)
         }
     }
 
-#if defined(SEND_ANTENNA_STATUS_REQUESTS)
+#if defined(ANTENNA_STATUS_REQUEST_REPEAT)
     // Check if we are supposed to send antenna status request commands
     if (m_bSendExternalAntennaStatusRequest)
     {
