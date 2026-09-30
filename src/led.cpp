@@ -1,8 +1,25 @@
 /*
  * Pico LED class
  *
- * (c) 2025-2026 Erik Tkal
+ * Copyright (c) 2025-2026 Erik Tkal
  *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
  */
 
 #include "led.h"
@@ -13,38 +30,60 @@
 #include "ws2812.pio.h"
 #include "timemgr.h"
 
-static inline void put_pixel(uint32_t pixel_grb)
-{
-    pio_sm_put_blocking(pio0, 0, pixel_grb << 8u);
-}
+std::deque<LED::Shared> LED::sm_mapLEDs;
 
 // Use repeating_timer to avoid hangs in sleep_ms with pico_w
 bool LED::ledOffTimerCallback(repeating_timer_t* pTimer)
 {
-    LED* pThis = reinterpret_cast<LED*>(pTimer->user_data);
-    pThis->m_bTurnLedOff = true;
+    BlinkContext* pContext = reinterpret_cast<BlinkContext*>(pTimer->user_data);
+    LED* pLed = pContext->spLED.get();
+    pLed->SetPixel(pContext->idx, led_off);
+    pLed->m_bUpdateRequested = true;
     return false; // cancels
+}
+
+LED::LED()
+    : m_nIndexInMapLEDs(sm_mapLEDs.size())
+{
+    sm_mapLEDs.push_back(Shared(this));
 }
 
 LED::~LED()
 {
     cancel_repeating_timer(&m_LedTimer);
+    sm_mapLEDs.erase(sm_mapLEDs.begin() + m_nIndexInMapLEDs);
 }
 
-void LED::Blink_ms(uint duration, uint32_t color)
+void LED::Blink_ms(uint idx, uint duration)
 {
-    On();
-    add_repeating_timer_ms(duration, LED::ledOffTimerCallback, reinterpret_cast<void*>(this), &m_LedTimer);
+    std::unique_ptr<BlinkContext> spContext = std::make_unique<BlinkContext>();
+    spContext->spLED = Shared(this);
+    spContext->idx = idx;
+    On(idx);
+    add_repeating_timer_ms(duration, LED::ledOffTimerCallback, reinterpret_cast<void*>(spContext.release()), &m_LedTimer);
 }
 
-void LED::CheckForWork()
+void LED::DoWork()
 {
-    if (m_bTurnLedOff)
+    if (m_bUpdateRequested)
     {
-        Off();
-        m_bTurnLedOff = false;
+        Show();
+        m_bUpdateRequested = false;
     }
 }
+
+LED::Shared LED::GetLED(uint nLEDIndex)
+{
+    if (nLEDIndex < sm_mapLEDs.size())
+    {
+        return sm_mapLEDs[nLEDIndex];
+    }
+    return nullptr;
+}
+
+//
+// LED_pico - Raspberry Pi Pico GPIO LED support
+//
 
 LED_pico::LED_pico(uint pin)
     : m_nPin(pin),
@@ -73,26 +112,53 @@ void LED_pico::Initialize()
     Off();
 }
 
-void LED_pico::On()
+void LED_pico::On(uint idx)
 {
-    for (auto i : m_vIgnore)
+    if (idx == 0 || idx == led_all)
     {
-        if (i == m_nColor)
-        {
-            return;
-        }
+        Show();
     }
-    gpio_put(m_nPin, LED_ON);
 }
 
-void LED_pico::Off()
+void LED_pico::Off(uint idx)
 {
-    gpio_put(m_nPin, LED_OFF);
+    if (idx == 0 || idx == led_all)
+    {
+        m_nColor = led_off;
+        Show();
+    }
 }
 
-void LED_pico::SetPixel(uint idx, uint32_t color)
+void LED_pico::Show()
 {
-    m_nColor = color;
+    if (m_nColor != led_off)
+    {
+        gpio_put(m_nPin, LED_ON);
+    }
+    else
+    {
+        gpio_put(m_nPin, LED_OFF);
+    }
+}
+
+void LED_pico::SetPixel(uint idx, uint32_t color, uint8_t brightness)
+{
+    if (idx == 0 || idx == led_all)
+    {
+        for (auto i : m_vIgnore)
+        {
+            if (i == m_nColor)
+            {
+                m_nColor = led_off;
+            }
+        }
+        m_nColor = color;
+    }
+}
+
+uint32_t LED_pico::GetPixel(uint idx)
+{
+    return m_nColor;
 }
 
 void LED_pico::SetIgnore(std::vector<uint32_t> vIgnore)
@@ -100,6 +166,49 @@ void LED_pico::SetIgnore(std::vector<uint32_t> vIgnore)
     m_vIgnore = vIgnore;
 }
 
+//
+// LED_pico_w - Raspberry Pi Pico W GPIO LED support
+//
+
+#if defined(PLATFORM_PICO_W)
+LED_pico_w::LED_pico_w(uint pin)
+{
+    m_nPin = pin;
+}
+
+LED_pico_w::~LED_pico_w()
+{
+    Off();
+}
+
+void LED_pico_w::Initialize()
+{
+    Off();
+}
+
+void LED_pico_w::Show()
+{
+    cyw43_thread_enter();
+    if (m_nColor != led_off)
+    {
+        cyw43_arch_gpio_put(m_nPin, 1);
+    }
+    else
+    {
+        cyw43_arch_gpio_put(m_nPin, 0);
+    }
+    cyw43_thread_exit();
+}
+#endif
+
+//
+// LED_neo - WS2812 LED support
+//
+
+static inline void put_pixel(uint32_t pixel_grb)
+{
+    pio_sm_put_blocking(pio0, 0, pixel_grb << 8u);
+}
 
 LED_neo::LED_neo(uint numLEDs, uint pin, uint powerPin, bool bIsRGBW)
     : m_nPin(pin),
@@ -134,10 +243,22 @@ void LED_neo::Initialize()
     }
 
     m_vPixels.resize(m_nNumLEDs);
-    Off();
+    Off(led_all);
+    sleep_us(300);
 }
 
-void LED_neo::On()
+void LED_neo::On(uint idx)
+{
+    Show();
+}
+
+void LED_neo::Off(uint idx)
+{
+    SetPixel(idx, led_off);
+    Show();
+}
+
+void LED_neo::Show()
 {
     for (size_t i = 0; i < m_nNumLEDs; ++i)
     {
@@ -145,53 +266,22 @@ void LED_neo::On()
     }
 }
 
-void LED_neo::Off()
+void LED_neo::SetPixel(uint idx, uint32_t color, uint8_t brightness)
 {
     for (size_t i = 0; i < m_nNumLEDs; ++i)
     {
-        put_pixel(0);
-    }
-}
-
-void LED_neo::SetPixel(uint idx, uint32_t color)
-{
-    m_vPixels[idx] = color;
-}
-
-#if defined(PLATFORM_PICO_W)
-LED_pico_w::LED_pico_w(uint pin)
-{
-    m_nPin = pin;
-}
-
-LED_pico_w::~LED_pico_w()
-{
-    Off();
-}
-
-void LED_pico_w::Initialize()
-{
-    Off();
-}
-
-void LED_pico_w::On()
-{
-    for (auto i : m_vIgnore)
-    {
-        if (i == m_nColor)
+        if (i == idx || led_all == idx)
         {
-            return;
+            m_vPixels[i] = scale_color(color, 0 == brightness ? max_lum : brightness);
         }
     }
-    cyw43_thread_enter();
-    cyw43_arch_gpio_put(m_nPin, 1);
-    cyw43_thread_exit();
 }
 
-void LED_pico_w::Off()
+uint32_t LED_neo::GetPixel(uint idx)
 {
-    cyw43_thread_enter();
-    cyw43_arch_gpio_put(m_nPin, 0);
-    cyw43_thread_exit();
+    if (idx < m_nNumLEDs)
+    {
+        return m_vPixels[idx];
+    }
+    return led_off;
 }
-#endif

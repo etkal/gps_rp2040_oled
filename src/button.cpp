@@ -35,7 +35,9 @@ Button::Button(uint nButtonPin, uint nDebounceMs, uint nPressMs, uint nLongPress
       m_nDebounceMs(nDebounceMs),
       m_nPressMs(nPressMs),
       m_nLongPressMs(nLongPressMs),
-      m_debounceTimer([this]() { onDebounceTimer(); })
+      m_debounceTimer([this]() {
+          onDebounceTimer();
+      })
 {
 }
 

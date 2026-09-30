@@ -1,7 +1,7 @@
 /*
  * Pico Button class
  *
- * (c) 2026 Erik Tkal
+ * Copyright (c) 2026 Erik Tkal
  *
  * Button class for handling GPIO button events on the Raspberry Pi Pico.
  *
@@ -53,7 +53,7 @@ private:
     uint m_nLongPressMs {0};
 
     AlarmTimer m_debounceTimer;
-    bool m_bPressed {false};      // debounced logical state (true = pressed)
+    bool m_bPressed {false}; // debounced logical state (true = pressed)
     uint64_t m_nPressStartTime {0};
 
     eventCallback m_pEventCB {nullptr};

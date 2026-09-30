@@ -1,7 +1,7 @@
 /*
  * Time manager for wall-clock validity and time-zone offset state.
  *
- * (c) 2026 Erik Tkal
+ * Copyright (c) 2026 Erik Tkal
  *
  */
 
@@ -28,6 +28,14 @@ class TimeMgr
 public:
     typedef std::shared_ptr<TimeMgr> Shared;
 
+    // Identifies which source last successfully set the wall clock.
+    enum class TimeSource
+    {
+        Unknown,
+        Gps,
+        Ntp,
+    };
+
     static Shared GetInstance();
     static void InitializeSingleton(std::string timeZoneName = "UTC");
 
@@ -43,7 +51,10 @@ public:
     static void LogInfo(const std::string& message);
 
     static bool SetTimeFromNtp(uint32_t timeoutMs = 10000);
+    static void EnableNtpAutoRetry(uint32_t retryIntervalMs = 60000, uint32_t timeoutMs = 10000);
+    static bool AttemptNtpTimeSync();
     static bool SetTimeFromGps(const std::string& gpsTime, const std::string& gpsDate);
+    static TimeSource GetTimeSource();
     static bool RefreshTimeZoneOffset(std::time_t whenUtc = 0);
     static bool IsValid();
     static bool HasTimeZoneOffset();
@@ -56,7 +67,10 @@ private:
     explicit TimeMgr(std::string timeZoneName = "UTC");
 
     bool setTimeFromNtp(uint32_t timeoutMs = 10000);
+    void enableNtpAutoRetry(uint32_t retryIntervalMs, uint32_t timeoutMs);
+    bool attemptNtpTimeSync();
     bool setTimeFromGps(const std::string& gpsTime, const std::string& gpsDate);
+    TimeSource getTimeSource() const;
     bool refreshTimeZoneOffset(std::time_t whenUtc = 0);
     bool isValid() const;
     bool hasTimeZoneOffset() const;
@@ -74,8 +88,14 @@ private:
     std::string m_timeZoneName;
     std::string m_timeZoneAbbrev;
     float m_timeZoneOffsetHours;
-    bool m_isDst;
-    bool m_hasTimeZoneOffset;
+    bool m_bIsDst;
+    bool m_bHasTimeZoneOffset;
+
+    bool m_bNtpAutoRetryEnabled;
+    uint32_t m_ntpRetryIntervalMs;
+    uint32_t m_ntpTimeoutMs;
+    absolute_time_t m_nextNtpAttemptTime;
+    TimeSource m_timeSource {TimeSource::Unknown};
 };
 
 // Helper function to log messages with TimeMgr context
@@ -114,8 +134,8 @@ private:
     alarm_pool_t* m_pAlarmPool;
     alarm_id_t m_delayAlarmId;
     repeating_timer m_repeatingTimer;
-    bool m_repeatingActive;
-    bool m_running;
+    bool m_bRepeatingActive;
+    bool m_bRunning;
 };
 
 // AlarmTimer is a utility class that executes a callback once at a specific future time.
@@ -139,5 +159,5 @@ private:
     std::function<void()> m_callback;
     alarm_pool_t* m_pAlarmPool;
     alarm_id_t m_alarmId;
-    bool m_running;
+    bool m_bRunning;
 };

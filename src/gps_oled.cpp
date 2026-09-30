@@ -175,7 +175,7 @@ void GPS_OLED::Run()
             updateUI(m_spLastGPSData);
 #endif
         }
-        m_spLED->CheckForWork();
+        m_spLED->DoWork();
 #if !defined(GPS_ON_CORE_1)
         m_spGPS->RunOnce();
 #endif
