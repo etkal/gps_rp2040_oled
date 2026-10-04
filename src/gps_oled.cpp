@@ -543,10 +543,9 @@ int GPS_OLED::linePos(int nLine)
     }
     else
     {
-        int y = m_spDisplay->Height() + (nLine * getLineAdvance());
-        // Line advance can be tighter than glyph height; keep the last line fully on screen (descenders)
-        const int yMax = m_spDisplay->Height() - getCharHeight();
-        return (nLine == -1 && y > yMax) ? yMax : y;
+        // Anchor the last line (-1) fully on screen so descenders aren't clipped,
+        // then step upward by the line advance for -2, -3, ...
+        return m_spDisplay->Height() - getCharHeight() + ((nLine + 1) * getLineAdvance());
     }
 }
 
