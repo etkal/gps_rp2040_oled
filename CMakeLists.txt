@@ -22,6 +22,9 @@ cmake_minimum_required(VERSION 3.24)
 set(PICO_BOARD waveshare_rp2040_zero)
 #set(PICO_BOARD seeed_xiao_rp2040)
 
+# Enable the following to use the debugprobe for debugging
+#set(PICO_DEBUGPROBE 1)
+
 # Some LED modules use RGB ordering for the WS2812 LEDs
 add_compile_definitions(WS2812_LED_IS_RGB)
 
@@ -48,10 +51,10 @@ add_compile_definitions(GMT_OFFSET=-4.0)
 # issues with some GPS modules). If you have issues, comment out the following line.
 # setting to 0 indicates not to repeat, only send once (after a delay), any other value
 # repeats at that interval (in seconds).
-add_compile_definitions(ANTENNA_STATUS_REQUEST_REPEAT=0)
+add_compile_definitions(ANTENNA_STATUS_REQUEST_REPEAT_SECONDS=0)
 
-# Enable display of vsys voltage and power source. Note: incorrect on Pico 2 (non-W variant)
-#add_compile_definitions(DISPLAY_VSYS_VOLTAGE)
+# Enable echo to UART1
+add_compile_definitions(ECHO_TO_UART1)
 
 # Privacy: obscure the location information in the GPS data
 #add_compile_definitions(OBSCURE_LOCATION)
@@ -72,6 +75,7 @@ include(pico_sdk_import.cmake)
 project(gps_oled C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(PICO_CXX_ENABLE_EXCEPTIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
 
@@ -84,22 +88,21 @@ add_compile_options(-Wall
     -Wno-maybe-uninitialized
 )
 
-# Power status
-add_library(power_status_adc INTERFACE)
-target_sources(power_status_adc INTERFACE
-    ${CMAKE_CURRENT_LIST_DIR}/src/power_status.cpp
-)
-target_include_directories(power_status_adc INTERFACE
-    ${CMAKE_CURRENT_LIST_DIR}/src
-)
-target_link_libraries(power_status_adc INTERFACE
-    hardware_adc
-    hardware_gpio
-)
+if(PICO_DEBUGPROBE)
+    add_compile_definitions(PICO_DEBUGPROBE)
+    # Set stdout to use UART1 for debugprobe
+    add_compile_definitions(gps_oled PRIVATE
+        PICO_DEFAULT_UART=1
+        PICO_DEFAULT_UART_TX_PIN=8 # GPIO 8 (Pin 6)
+        PICO_DEFAULT_UART_RX_PIN=9 # GPIO 9k (Pin 7)
+    )
+endif()
 
 add_executable(gps_oled)
 pico_enable_stdio_usb(${PROJECT_NAME} 1)
-pico_enable_stdio_uart(${PROJECT_NAME} 0)
+if(PICO_DEBUGPROBE)
+    pico_enable_stdio_uart(${PROJECT_NAME} 1) # for debugprobe
+endif()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/generated)
 # generate the header file into the source tree as it is included in the RP2040 datasheet
@@ -124,7 +127,6 @@ target_link_libraries(gps_oled
     hardware_pio
     hardware_i2c
     hardware_dma
-    power_status_adc
     pico_aon_timer
     pico_multicore
 )

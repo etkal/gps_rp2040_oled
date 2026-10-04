@@ -28,47 +28,63 @@
 #include "pico/cyw43_arch.h"
 #endif
 #include "ws2812.pio.h"
-#include "timemgr.h"
 
 std::deque<LED::Shared> LED::sm_mapLEDs;
 
-// Use repeating_timer to avoid hangs in sleep_ms with pico_w
-bool LED::ledOffTimerCallback(repeating_timer_t* pTimer)
+LED::LED()
+    : LED(1)
 {
-    BlinkContext* pContext = reinterpret_cast<BlinkContext*>(pTimer->user_data);
-    LED* pLed = pContext->spLED.get();
-    pLed->SetPixel(pContext->idx, led_off);
-    pLed->m_bUpdateRequested = true;
-    return false; // cancels
 }
 
-LED::LED()
-    : m_nIndexInMapLEDs(sm_mapLEDs.size())
+LED::LED(uint numPixels)
+    : m_BlinkContexts(numPixels),
+      m_nIndexInMapLEDs(sm_mapLEDs.size())
 {
     sm_mapLEDs.push_back(Shared(this));
 }
 
 LED::~LED()
 {
-    cancel_repeating_timer(&m_LedTimer);
     sm_mapLEDs.erase(sm_mapLEDs.begin() + m_nIndexInMapLEDs);
 }
 
 void LED::Blink_ms(uint idx, uint duration)
 {
-    std::unique_ptr<BlinkContext> spContext = std::make_unique<BlinkContext>();
-    spContext->spLED = Shared(this);
-    spContext->idx = idx;
+    const uint64_t offTime = time_us_64() + static_cast<uint64_t>(duration) * 1000;
+    const uint64_t deadline = offTime == 0 ? 1 : offTime;
+    if (idx == led_all)
+    {
+        for (BlinkContext& context : m_BlinkContexts)
+        {
+            context.offTime = deadline;
+        }
+    }
+    else if (idx < m_BlinkContexts.size())
+    {
+        m_BlinkContexts[idx].offTime = deadline;
+    }
+
     On(idx);
-    add_repeating_timer_ms(duration, LED::ledOffTimerCallback, reinterpret_cast<void*>(spContext.release()), &m_LedTimer);
 }
 
 void LED::DoWork()
 {
-    if (m_bUpdateRequested)
+    const uint64_t now = time_us_64();
+    bool bShow = false;
+    for (size_t idx = 0; idx < m_BlinkContexts.size(); ++idx)
+    {
+        BlinkContext& context = m_BlinkContexts[idx];
+        if (context.offTime != 0 && now >= context.offTime)
+        {
+            SetPixel(static_cast<uint>(idx), led_off);
+            context.offTime = 0;
+            bShow = true;
+        }
+    }
+
+    if (bShow)
     {
         Show();
-        m_bUpdateRequested = false;
     }
 }
 
@@ -211,7 +227,8 @@ static inline void put_pixel(uint32_t pixel_grb)
 }
 
 LED_neo::LED_neo(uint numLEDs, uint pin, uint powerPin, bool bIsRGBW)
-    : m_nPin(pin),
+    : LED(numLEDs),
+      m_nPin(pin),
       m_nPowerPin(powerPin),
       m_nNumLEDs(numLEDs),
       m_bIsRGBW(bIsRGBW)

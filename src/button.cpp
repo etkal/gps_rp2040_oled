@@ -37,6 +37,9 @@ Button::Button(uint nButtonPin, uint nDebounceMs, uint nPressMs, uint nLongPress
       m_nLongPressMs(nLongPressMs),
       m_debounceTimer([this]() {
           onDebounceTimer();
+      }),
+      m_longPressTimer([this]() {
+          onLongPressTimer();
       })
 {
 }
@@ -46,6 +49,7 @@ void Button::Initialize()
     gpio_init(m_nPin);
     gpio_set_dir(m_nPin, GPIO_IN);
     gpio_pull_up(m_nPin);
+    sleep_ms(2);                    // let the pull-up settle, otherwise the pin can read low and mask the first press
     m_bPressed = !gpio_get(m_nPin); // establish initial resting state (active low)
     gpio_set_irq_enabled_with_callback(m_nPin, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &Button::irqHandler);
     sm_mapButtons[m_nPin] = shared_from_this();
@@ -92,9 +96,16 @@ void Button::onDebounceTimer()
     if (bPressedNow)
     {
         m_nPressStartTime = time_us_64();
+        m_bLongPressFired = false;
+        m_longPressTimer.Start(m_nLongPressMs);
+    }
+    else if (m_bLongPressFired)
+    {
+        m_bLongPressFired = false; // long press already reported; ignore the release
     }
     else if (m_pEventCB)
     {
+        m_longPressTimer.Stop();
         uint64_t pressDuration = (time_us_64() - m_nPressStartTime) / 1000; // ms
 
         if (pressDuration >= m_nLongPressMs)
@@ -109,5 +120,18 @@ void Button::onDebounceTimer()
         {
             m_pEventCB(m_pEventCtx, ButtonEvent::Tap);
         }
+    }
+}
+
+void Button::onLongPressTimer()
+{
+    if (!m_bPressed || m_bLongPressFired)
+    {
+        return;
+    }
+    m_bLongPressFired = true;
+    if (m_pEventCB)
+    {
+        m_pEventCB(m_pEventCtx, ButtonEvent::LongPress);
     }
 }

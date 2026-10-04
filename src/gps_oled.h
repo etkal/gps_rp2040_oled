@@ -20,20 +20,32 @@
 #include "led.h"
 #include "button.h"
 #include "font.h"
-#include "timemgr.h"
+#include "timers.h"
 
 enum class DisplayMode
 {
-    ModeAny,
     ModeFull,
-    ModeTimeClock,
-    ModeTimeText,
-    ModeLatLonAlt,
-    ModeLatLonAltFeet,
-    ModeSpeedMph,
-    ModeSpeedKph,
-    ModeSpeedKts
+    ModeTime,
+    ModePosition,
+    ModeSpeed
 };
+
+enum class SpeedUnit
+{
+    Mph,
+    Kph,
+    Knots
+};
+
+class GPS_OLED_Status
+{
+public:
+    bool bHasPosition {false};
+    bool bExternalAntenna {false};
+    std::string strGpsTimeRaw;
+    std::string strGpsDateRaw;
+};
+
 
 // GPS_OLED class
 //
@@ -43,16 +55,20 @@ enum class DisplayMode
 // and the LED can be used to indicate a position lock and/or other
 // status.
 //
-class GPS_OLED
+class GPS_OLED : public std::enable_shared_from_this<GPS_OLED>
 {
 public:
     typedef std::shared_ptr<GPS_OLED> Shared;
 
-    GPS_OLED(SSD1306::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED, Button::Shared spButton);
+    GPS_OLED(SSD1306::Shared spDisplay, GPS::Shared spGPS, Button::Shared spButton);
     ~GPS_OLED();
 
     void Initialize();
+    void Start();
     void Run();
+    void DoWork();
+    void Stop();
+    bool GetStatus(GPS_OLED_Status& status);
 
 private:
     static void gpsDataCB(void* pCtx, GPSData::Shared spGPSData);
@@ -67,9 +83,6 @@ private:
 
     bool handleButtonEvent();
     void showScreenMessage(std::string strMessage);
-    void blinkLED(bool bHasPosition, bool bExternalAntenna);
-    void updateTime(std::string strGPSTimeRaw, std::string strGPSDateRaw);
-    std::string getVsysVoltage();
     void updateUI(GPSData::Shared spGPSData);
     void drawFullUI(GPSData::Shared spGPSData);
     void drawSatGrid(const GPSData::Shared& spGPSData, uint xCenter, uint yCenter, uint radius, uint nRings = 3);
@@ -125,16 +138,26 @@ private:
         return pFont ? pFont->effectiveLineAdvance() - pFont->lineAdvance : 8;
     }
 
+    bool m_bExit {false};
+    bool m_bInitialized {false};
     SSD1306::Shared m_spDisplay;
     GPS::Shared m_spGPS;
-    LED::Shared m_spLED;
     Button::Shared m_spButton;
-    uint64_t m_nLastTimeSyncAttemptSec;
     queue_t m_qIncomingGPSData;       // Queue of GPS data from the source
     queue_t m_qDisplayGPSData;        // Queue of GPS data to be displayed
     GPSData::Shared m_spLastGPSData;  // Last GPS data seen on core 0, for immediate button-triggered redraws
     AlarmTimer::Shared m_spIdleTimer; // Timer to detect lack of GPS data
     bool m_bShowWaitingForGPS {false};
+    bool m_bHasPosition {false};
+    bool m_bExternalAntenna {false};
+    std::string m_strGpsTimeRaw;
+    std::string m_strGpsDateRaw;
+    bool m_bStatusChanged {false};
+
     ButtonEvent m_eLastButtonEvent {ButtonEvent::None};
     DisplayMode m_eDisplayMode {DisplayMode::ModeFull};
+    SpeedUnit m_eSpeedUnit {SpeedUnit::Mph};
+    bool m_bTextTime {false};
+    bool m_bAltitudeFeet {true};
+    critical_section m_CallbackCs;
 };

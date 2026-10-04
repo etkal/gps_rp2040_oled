@@ -28,7 +28,6 @@
 #include <iostream>
 #include <math.h>
 #include <iomanip>
-#include <vector>
 
 #include "pico/stdlib.h"
 #include "pico/double.h"
@@ -37,67 +36,23 @@
 #include "hardware/uart.h"
 
 #include "ssd1306.h"
-#include "power_status.h"
 #include "font_factory.h"
-
-#if !defined(NDEBUG)
-#include <malloc.h>
-static uint32_t getTotalHeap()
-{
-    extern char __StackLimit, __bss_end__;
-    return &__StackLimit - &__bss_end__;
-}
-static uint32_t getFreeHeap()
-{
-    struct mallinfo m = mallinfo();
-    return getTotalHeap() - m.uordblks;
-}
-#endif
+#include "log.h"
+#include "timemgr.h"
 
 #define SAT_ICON_RADIUS 2
 
 namespace
 {
-    constexpr uint64_t timeSyncRetryIntervalSec = 5 * 60;
     constexpr double pi = 3.14159265359;
-
 } // namespace
 
-struct DisplayModeStateMachine
-{
-    DisplayMode m_currentMode;
-    ButtonEvent m_lastEvent;
-    DisplayMode m_nextMode;
-};
-
-std::vector<DisplayModeStateMachine> g_displayModeStateMachine = {
-    {DisplayMode::ModeFull,          ButtonEvent::Tap,       DisplayMode::ModeTimeClock    },
-    {DisplayMode::ModeTimeClock,     ButtonEvent::Press,     DisplayMode::ModeTimeText     },
-    {DisplayMode::ModeTimeText,      ButtonEvent::Press,     DisplayMode::ModeTimeClock    },
-    {DisplayMode::ModeTimeClock,     ButtonEvent::Tap,       DisplayMode::ModeLatLonAlt    },
-    {DisplayMode::ModeTimeText,      ButtonEvent::Tap,       DisplayMode::ModeLatLonAlt    },
-    {DisplayMode::ModeLatLonAlt,     ButtonEvent::Press,     DisplayMode::ModeLatLonAltFeet},
-    {DisplayMode::ModeLatLonAltFeet, ButtonEvent::Press,     DisplayMode::ModeLatLonAlt    },
-    {DisplayMode::ModeLatLonAlt,     ButtonEvent::Tap,       DisplayMode::ModeSpeedMph     },
-    {DisplayMode::ModeLatLonAltFeet, ButtonEvent::Tap,       DisplayMode::ModeSpeedMph     },
-    {DisplayMode::ModeSpeedMph,      ButtonEvent::Press,     DisplayMode::ModeSpeedKph     },
-    {DisplayMode::ModeSpeedKph,      ButtonEvent::Press,     DisplayMode::ModeSpeedKts     },
-    {DisplayMode::ModeSpeedKts,      ButtonEvent::Press,     DisplayMode::ModeSpeedMph     },
-    {DisplayMode::ModeSpeedMph,      ButtonEvent::Tap,       DisplayMode::ModeFull         },
-    {DisplayMode::ModeSpeedKph,      ButtonEvent::Tap,       DisplayMode::ModeFull         },
-    {DisplayMode::ModeSpeedKts,      ButtonEvent::Tap,       DisplayMode::ModeFull         },
-    {DisplayMode::ModeAny,           ButtonEvent::LongPress, DisplayMode::ModeFull         },
-};
-
-GPS_OLED::GPS_OLED(SSD1306::Shared spDisplay, GPS::Shared spGPS, LED::Shared spLED, Button::Shared spButton)
+GPS_OLED::GPS_OLED(SSD1306::Shared spDisplay, GPS::Shared spGPS, Button::Shared spButton)
     : m_spDisplay(spDisplay),
       m_spGPS(spGPS),
-      m_spLED(spLED),
-      m_spButton(spButton),
-      m_nLastTimeSyncAttemptSec(std::numeric_limits<uint64_t>::max())
+      m_spButton(spButton)
 {
-    queue_init(&m_qIncomingGPSData, sizeof(GPSData::Shared*), 10); // Initialize the queue with a capacity of 10
-    queue_init(&m_qDisplayGPSData, sizeof(GPSData::Shared*), 10);  // Initialize the queue with a capacity of 10
+    critical_section_init(&m_CallbackCs);
 }
 
 GPS_OLED::~GPS_OLED()
@@ -106,6 +61,10 @@ GPS_OLED::~GPS_OLED()
 
 void GPS_OLED::Initialize()
 {
+    m_bInitialized = true;
+    queue_init(&m_qIncomingGPSData, sizeof(GPSData::Shared*), 10); // Initialize the queue with a capacity of 10
+    queue_init(&m_qDisplayGPSData, sizeof(GPSData::Shared*), 10);  // Initialize the queue with a capacity of 10
+
     m_spDisplay->Initialize();
 
     // Initialize display with desired font (best is Terminus 12, anything larger is not recommended)
@@ -123,91 +82,114 @@ void GPS_OLED::Initialize()
     });
 }
 
+void GPS_OLED::Start()
+{
+#if defined(DISPLAY_ON_CORE_1)
+    static auto sm_spThis = shared_from_this(); // Capture pointer for use in lambda
+    // Default core 1 stack is only 4KB; iostream/ostringstream logging overflows it
+    static uint32_t sm_core1Stack[16 * 1024 / sizeof(uint32_t)];
+    multicore_launch_core1_with_stack(
+        []() {
+            GPS_OLED::Shared spThis = sm_spThis;
+            // Initialize and run the GPS processing loop on core 1
+            LogInfo("Starting GPS_OLED processing on core 1");
+            spThis->Initialize();
+            spThis->Run();
+        },
+        sm_core1Stack,
+        sizeof(sm_core1Stack));
+#else
+    LogInfo("Initializing GPS_OLED processing on core 0");
+    Initialize();
+#endif
+}
+
 void GPS_OLED::Run()
 {
-#if defined(GPS_ON_CORE_1)
-    // Start GPS processing loop on processor core 1
-    static auto sm_spGPS = m_spGPS; // Capture shared pointer for use in lambda
-    multicore_launch_core1([]() {
-        GPS::Shared spGPS = sm_spGPS;
-        // Initialize and run the GPS processing loop on core 1
-        LogInfo("Starting GPS processing on core 1");
-        spGPS->Initialize();
-        spGPS->Run();
-    });
-#else
-    // If we are not using multicore, we can run the GPS processing from the display loop
-    LogInfo("Starting GPS processing on core 0");
-    m_spGPS->Initialize();
-#endif // GPS_ON_CORE_1
-
 #if defined(DISPLAY_ON_CORE_1)
-    static auto sm_pThis = this; // Capture pointer for use in lambda
-    multicore_launch_core1([]() {
-        GPS_OLED* pThis = sm_pThis;
-        while (true)
-        {
-            static GPSData::Shared spLastGPSData;
-            multicore_fifo_pop_blocking(); // Wait for signal from core 0
-            GPSData::Shared spGPSData = dequeueLatestGPSData(pThis->m_qDisplayGPSData);
-            if (spGPSData)
-            {
-                pThis->updateUI(spGPSData);
-                spLastGPSData = spGPSData;
-            }
-            else if (spLastGPSData)
-            {
-                pThis->updateUI(spLastGPSData);
-            }
-        }
-    });
+    while (!m_bExit)
+    {
+        DoWork();
+    }
+#else
+    LogInfo("GPS_OLED::Run() should not be called on core 0");
+    return;
 #endif
+}
 
-    // Main loop for updating the display
-    while (true)
+void GPS_OLED::DoWork()
+{
+#if defined(DISPLAY_ON_CORE_1)
+    if (0 == get_core_num())
+    {
+        return; // Skip processing on core 0 if GPS_OLED is running on core 1
+    }
+#endif
+    if (!m_bInitialized)
+    {
+        return;
+    }
+    if (!m_bExit)
     {
         if (handleButtonEvent() && m_spLastGPSData)
         {
             // Redraw immediately with the last known data rather than waiting for the next GPS update
-#if defined(DISPLAY_ON_CORE_1)
-            multicore_fifo_push_blocking(0); // Signal core 1 to redraw using its last received data
-#else
             updateUI(m_spLastGPSData);
-#endif
         }
-        m_spLED->DoWork();
-#if !defined(GPS_ON_CORE_1)
-        m_spGPS->RunOnce();
-#endif
-        GPSData::Shared spGPSData = dequeueLatestGPSData(m_qIncomingGPSData);
 
+        GPSData::Shared spGPSData = dequeueLatestGPSData(m_qIncomingGPSData);
         if (spGPSData)
         {
-            LogInfo("GPS_OLED - Processing new GPS data");
+            LogInfoD("GPS_OLED - Processing new GPS data");
             // Perform operations that need to run on core 0 (main core)
-            updateTime(spGPSData->strGPSTimeRaw, spGPSData->strGPSDateRaw);
-            // LogInfo("GPS: " + spGPSData->strGPSTimeRaw + " Clock: " + TimeMgr::FormatCurrentTimeUTC());
-            blinkLED(spGPSData->bHasPosition, spGPSData->bExternalAntenna);
-            spGPSData->strVsys = getVsysVoltage();
-            m_spLastGPSData = spGPSData; // Kept on core 0 only, for immediate button-triggered redraws
-#if defined(DISPLAY_ON_CORE_1)
-            // Hand ownership across cores; queue holds a heap-allocated shared_ptr wrapper only
-            if (enqueueGPSData(m_qDisplayGPSData, spGPSData))
-            {
-                multicore_fifo_push_blocking(0);
-            }
-#else
+            critical_section_enter_blocking(&m_CallbackCs);
+            m_bStatusChanged = true;
+            m_bHasPosition = spGPSData->bHasPosition;
+            m_bExternalAntenna = spGPSData->bExternalAntenna;
+            m_strGpsTimeRaw = spGPSData->strGPSTimeRaw;
+            m_strGpsDateRaw = spGPSData->strGPSDateRaw;
+            critical_section_exit(&m_CallbackCs);
+            m_spLastGPSData = spGPSData;
             updateUI(spGPSData);
-#endif
-            m_spIdleTimer->Start(10000); // Reset the idle timer to 10 seconds
+            m_spIdleTimer->Start(5000); // Reset the idle timer
         }
         if (m_bShowWaitingForGPS)
         {
             LogInfo("GPS_OLED - No GPS data received showing waiting message");
+            critical_section_enter_blocking(&m_CallbackCs);
+            m_bStatusChanged = true;
+            m_bHasPosition = false;
+            m_bExternalAntenna = false;
+            m_strGpsTimeRaw.clear();
+            m_strGpsDateRaw.clear();
+            critical_section_exit(&m_CallbackCs);
             showScreenMessage("Waiting for GPS data");
             m_bShowWaitingForGPS = false;
         }
     }
+}
+
+// Stop the GPS_OLED processing loop. This will cause Run() to return.
+void GPS_OLED::Stop()
+{
+    m_bExit = true;
+}
+
+bool GPS_OLED::GetStatus(GPS_OLED_Status& status)
+{
+    critical_section_enter_blocking(&m_CallbackCs);
+    if (!m_bStatusChanged)
+    {
+        critical_section_exit(&m_CallbackCs);
+        return false;
+    }
+    m_bStatusChanged = false;
+    status.bHasPosition = m_bHasPosition;
+    status.bExternalAntenna = m_bExternalAntenna;
+    status.strGpsTimeRaw = m_strGpsTimeRaw;
+    status.strGpsDateRaw = m_strGpsDateRaw;
+    critical_section_exit(&m_CallbackCs);
+    return true;
 }
 
 bool GPS_OLED::enqueueGPSData(queue_t& q, const GPSData::Shared& spData)
@@ -239,41 +221,85 @@ GPSData::Shared GPS_OLED::dequeueLatestGPSData(queue_t& q)
 
 bool GPS_OLED::handleButtonEvent()
 {
+    critical_section_enter_blocking(&m_CallbackCs);
     if (ButtonEvent::None == m_eLastButtonEvent)
     {
+        critical_section_exit(&m_CallbackCs);
         return false;
     }
     if (ButtonEvent::Tap == m_eLastButtonEvent)
     {
-        LogInfo("GPS_OLED - Button tap detected");
+        LogInfoD("GPS_OLED - Button tap detected");
     }
     else if (ButtonEvent::Press == m_eLastButtonEvent)
     {
-        LogInfo("GPS_OLED - Button press detected");
+        LogInfoD("GPS_OLED - Button press detected");
     }
     else if (ButtonEvent::LongPress == m_eLastButtonEvent)
     {
-        LogInfo("GPS_OLED - Long button press detected");
+        LogInfoD("GPS_OLED - Long button press detected");
     }
 
-    for (auto entry : g_displayModeStateMachine)
+    switch (m_eLastButtonEvent)
     {
-        if ((entry.m_currentMode == m_eDisplayMode && entry.m_lastEvent == m_eLastButtonEvent) ||
-            (entry.m_currentMode == DisplayMode::ModeAny && entry.m_lastEvent == m_eLastButtonEvent))
+    case ButtonEvent::Tap:
+        switch (m_eDisplayMode)
         {
-            m_eDisplayMode = entry.m_nextMode;
+        case DisplayMode::ModeFull:
+            m_eDisplayMode = DisplayMode::ModeTime;
+            break;
+        case DisplayMode::ModeTime:
+            m_eDisplayMode = DisplayMode::ModePosition;
+            break;
+        case DisplayMode::ModePosition:
+            m_eDisplayMode = DisplayMode::ModeSpeed;
+            break;
+        case DisplayMode::ModeSpeed:
+            m_eDisplayMode = DisplayMode::ModeFull;
             break;
         }
+        break;
+    case ButtonEvent::Press:
+        if (DisplayMode::ModeTime == m_eDisplayMode)
+        {
+            m_bTextTime = !m_bTextTime;
+        }
+        else if (DisplayMode::ModePosition == m_eDisplayMode || DisplayMode::ModeFull == m_eDisplayMode)
+        {
+            m_bAltitudeFeet = !m_bAltitudeFeet;
+        }
+        else if (DisplayMode::ModeSpeed == m_eDisplayMode)
+        {
+            switch (m_eSpeedUnit)
+            {
+            case SpeedUnit::Mph:
+                m_eSpeedUnit = SpeedUnit::Kph;
+                break;
+            case SpeedUnit::Kph:
+                m_eSpeedUnit = SpeedUnit::Knots;
+                break;
+            case SpeedUnit::Knots:
+                m_eSpeedUnit = SpeedUnit::Mph;
+                break;
+            }
+        }
+        break;
+    case ButtonEvent::LongPress:
+        m_eDisplayMode = DisplayMode::ModeFull;
+        break;
+    default:
+        break;
     }
 
     // Reset the last button event after handling
     m_eLastButtonEvent = ButtonEvent::None;
+    critical_section_exit(&m_CallbackCs);
     return true; // trigger a display update on state change
 }
 
 void GPS_OLED::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
 {
-    LogInfo("GPS_OLED - received GPS data");
+    LogInfoD("GPS_OLED - received GPS data");
     // This callback is called from the GPS processing loop when new GPS data is available.
     // It most likely runs on a different thread/core than the main display loop, so we need
     // to ensure thread safety.  We will perform a deep copy of the GPSData and then call
@@ -286,6 +312,7 @@ void GPS_OLED::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
     }
 
     // Deep copy the GPSData once here; all subsequent hand-offs share ownership of this copy.
+    LogInfoD("GPS_OLED - Enqueueing GPS data");
     enqueueGPSData(pThis->m_qIncomingGPSData, std::make_shared<GPSData>(*spGPSData));
 }
 
@@ -312,6 +339,7 @@ void GPS_OLED::buttonEventCB(void* pCtx, ButtonEvent eType)
     }
 
     // Handle button events here
+    critical_section_enter_blocking(&pThis->m_CallbackCs);
     switch (eType)
     {
     case ButtonEvent::Tap:
@@ -326,6 +354,7 @@ void GPS_OLED::buttonEventCB(void* pCtx, ButtonEvent eType)
     default:
         break;
     }
+    critical_section_exit(&pThis->m_CallbackCs);
 }
 
 void GPS_OLED::showScreenMessage(std::string strMessage)
@@ -336,85 +365,27 @@ void GPS_OLED::showScreenMessage(std::string strMessage)
     m_spDisplay->Show();
 }
 
-void GPS_OLED::blinkLED(bool bHasPosition, bool bExternalAntenna)
-{
-    if (m_spLED)
-    {
-        if (bHasPosition)
-        {
-            m_spLED->SetPixel(0, bExternalAntenna ? led_blue : led_green);
-        }
-        else
-        {
-            m_spLED->SetPixel(0, bExternalAntenna ? led_magenta : led_red);
-        }
-        m_spLED->Blink_ms(20);
-    }
-}
-
-void GPS_OLED::updateTime(std::string strGPSTimeRaw, std::string strGPSDateRaw)
-{
-    // Update the system time if necessary
-    if (!strGPSTimeRaw.empty() && !strGPSDateRaw.empty())
-    {
-        const uint64_t uptimeSec = time_us_64() / 1000000;
-        const bool bNeverRetried = (m_nLastTimeSyncAttemptSec == std::numeric_limits<uint64_t>::max());
-        const bool bUpdateDue = !TimeMgr::IsWallClockValid() || bNeverRetried ||
-                                (uptimeSec - m_nLastTimeSyncAttemptSec >= timeSyncRetryIntervalSec) ||
-                                !TimeMgr::IsGpsTimeDateWithinOneSecond(strGPSTimeRaw, strGPSDateRaw);
-        if (bUpdateDue)
-        {
-            m_nLastTimeSyncAttemptSec = uptimeSec;
-            LogInfo("Attempting GPS time sync");
-            if (TimeMgr::SetTimeFromGps(strGPSTimeRaw, strGPSDateRaw))
-            {
-                LogInfo("GPS time synchronized");
-            }
-        }
-    }
-}
-
-std::string GPS_OLED::getVsysVoltage()
-{
-    std::string strVsys;
-#if defined(PLATFORM_PICO) && defined(DISPLAY_VSYS_VOLTAGE) // Only the Raspberry Pi Pico series have a VSYS voltage monitor
-    float vsys = 0.0;
-    bool bBattery = false;
-    std::string strVsys;
-    if (PICO_OK == power_voltage(&vsys))
-    {
-        power_source(&bBattery);
-        vsys = floorf(vsys * 100) / 100;
-        std::stringstream oss;
-        oss << (bBattery ? "b:" : "") << std::fixed << std::setfill(' ') << std::setprecision(1) << vsys << "V";
-        strVsys = oss.str();
-    }
-    LogInfo("getVsysVoltage: " + strVsys);
-#endif
-    return strVsys;
-}
-
 // Update the UI with the latest GPS data.
 void GPS_OLED::updateUI(GPSData::Shared spGPSData)
 {
-    LogInfo("GPS_OLED - updateUI() called");
+    LogInfoD("GPS_OLED - updateUI() called");
 
-    switch (m_eDisplayMode)
+    critical_section_enter_blocking(&m_CallbackCs);
+    auto eDisplayMode = m_eDisplayMode;
+    critical_section_exit(&m_CallbackCs);
+
+    switch (eDisplayMode)
     {
     case DisplayMode::ModeFull:
         drawFullUI(spGPSData);
         return;
-    case DisplayMode::ModeTimeClock:
-    case DisplayMode::ModeTimeText:
+    case DisplayMode::ModeTime:
         showTime(spGPSData);
         return;
-    case DisplayMode::ModeLatLonAlt:
-    case DisplayMode::ModeLatLonAltFeet:
+    case DisplayMode::ModePosition:
         showLatLon(spGPSData);
         return;
-    case DisplayMode::ModeSpeedKts:
-    case DisplayMode::ModeSpeedKph:
-    case DisplayMode::ModeSpeedMph:
+    case DisplayMode::ModeSpeed:
         showSpeed(spGPSData);
         return;
     default:
@@ -449,7 +420,10 @@ void GPS_OLED::drawFullUI(GPSData::Shared spGPSData)
     {
         drawText(0, spGPSData->strLatitude, COLOUR_WHITE, true, X_PAD);
         drawText(1, spGPSData->strLongitude, COLOUR_WHITE, true, X_PAD);
-        drawText(2, spGPSData->strAltitude, COLOUR_WHITE, true, X_PAD);
+        if (m_bAltitudeFeet)
+            drawText(2, spGPSData->strAltitudeFeet, COLOUR_WHITE, true, X_PAD);
+        else
+            drawText(2, spGPSData->strAltitude, COLOUR_WHITE, true, X_PAD);
     }
     if (!spGPSData->strGPSTime.empty())
     {
@@ -458,10 +432,6 @@ void GPS_OLED::drawFullUI(GPSData::Shared spGPSData)
 
     // blit the framebuf to the display
     m_spDisplay->Show();
-
-#if !defined(NDEBUG)
-    LogInfo("Total Heap: " + std::to_string(getTotalHeap()) + "  Free Heap: " + std::to_string(getFreeHeap()));
-#endif
 }
 
 void GPS_OLED::drawSatGrid(const GPSData::Shared& spGPSData, uint xCenter, uint yCenter, uint radius, uint nRings)
@@ -573,7 +543,9 @@ int GPS_OLED::linePos(int nLine)
     }
     else
     {
-        return m_spDisplay->Height() + (nLine * getLineAdvance());
+        // Anchor the last line (-1) fully on screen so descenders aren't clipped,
+        // then step upward by the line advance for -2, -3, ...
+        return m_spDisplay->Height() - getCharHeight() + ((nLine + 1) * getLineAdvance());
     }
 }
 
@@ -604,18 +576,20 @@ void GPS_OLED::showTime(const GPSData::Shared& spGPSData)
         return;
     }
 
-    switch (m_eDisplayMode)
+    critical_section_enter_blocking(&m_CallbackCs);
+    const bool bTextTime = m_bTextTime;
+    critical_section_exit(&m_CallbackCs);
+
+    if (!bTextTime)
     {
-    case DisplayMode::ModeTimeClock:
         drawClock(m_spDisplay->Width() / 2 - m_spDisplay->Height() / 2, 0, m_spDisplay->Height() / 2 - 1, spGPSData->strGPSTime);
-        break;
-    case DisplayMode::ModeTimeText:
-    default:
+    }
+    else
+    {
         drawTextCentered(0, TimeMgr::FormatCurrentDate(), COLOUR_WHITE);
         drawTextCentered(1, TimeMgr::FormatCurrentTimeHMS(), COLOUR_WHITE);
         drawTextCentered(-2, TimeMgr::FormatCurrentDateUTC(), COLOUR_WHITE);
         drawTextCentered(-1, TimeMgr::FormatCurrentTimeUTC() + " UTC", COLOUR_WHITE);
-        break;
     }
     m_spDisplay->Show();
 }
@@ -634,16 +608,17 @@ void GPS_OLED::showLatLon(const GPSData::Shared& spGPSData)
 
     drawText(0, spGPSData->strLatitude, COLOUR_WHITE, true, 1);
     drawText(1, spGPSData->strLongitude, COLOUR_WHITE, true, 1);
-    switch (m_eDisplayMode)
+    critical_section_enter_blocking(&m_CallbackCs);
+    const bool bAltitudeFeet = m_bAltitudeFeet;
+    critical_section_exit(&m_CallbackCs);
+
+    if (bAltitudeFeet)
     {
-    case DisplayMode::ModeLatLonAlt:
-        drawText(2, spGPSData->strAltitude, COLOUR_WHITE, true, 1);
-        break;
-    case DisplayMode::ModeLatLonAltFeet:
         drawText(2, spGPSData->strAltitudeFeet, COLOUR_WHITE, true, 1);
-        break;
-    default:
-        break;
+    }
+    else
+    {
+        drawText(2, spGPSData->strAltitude, COLOUR_WHITE, true, 1);
     }
     m_spDisplay->Show();
 }
@@ -651,18 +626,20 @@ void GPS_OLED::showLatLon(const GPSData::Shared& spGPSData)
 void GPS_OLED::showSpeed(const GPSData::Shared& spGPSData)
 {
     m_spDisplay->Fill(COLOUR_BLACK);
-    m_spDisplay->SetFont(get_terminus_font(24));
+    critical_section_enter_blocking(&m_CallbackCs);
+    const SpeedUnit eSpeedUnit = m_eSpeedUnit;
+    critical_section_exit(&m_CallbackCs);
+
     std::string strSpeed;
-    switch (m_eDisplayMode)
+    switch (eSpeedUnit)
     {
-    case DisplayMode::ModeSpeedMph:
+    case SpeedUnit::Mph:
         strSpeed = spGPSData->strSpeedMph;
         break;
-    case DisplayMode::ModeSpeedKph:
-        // Convert
+    case SpeedUnit::Kph:
         strSpeed = spGPSData->strSpeedKph;
         break;
-    case DisplayMode::ModeSpeedKts:
+    case SpeedUnit::Knots:
         strSpeed = spGPSData->strSpeedKts;
         break;
     default:
@@ -675,7 +652,14 @@ void GPS_OLED::showSpeed(const GPSData::Shared& spGPSData)
     }
     else
     {
-        drawTextCentered(1, strSpeed, COLOUR_WHITE);
+        size_t space_pos = strSpeed.find(' ');
+        if (space_pos != std::string::npos)
+        {
+            m_spDisplay->SetFont(get_terminus_font(32));
+            m_spDisplay->Text(strSpeed.substr(0, space_pos).c_str(), 0, 0, COLOUR_WHITE, 2);
+            m_spDisplay->SetFont(get_terminus_font(14));
+            drawText(-1, strSpeed.substr(space_pos + 1), COLOUR_WHITE);
+        }
     }
     m_spDisplay->Show();
 }
