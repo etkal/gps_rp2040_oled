@@ -246,15 +246,15 @@ bool GPS_OLED::handleButtonEvent()
         switch (m_eDisplayMode)
         {
         case DisplayMode::ModeFull:
+            m_eDisplayMode = DisplayMode::ModeSpeed;
+            break;
+        case DisplayMode::ModeSpeed:
             m_eDisplayMode = DisplayMode::ModeTime;
             break;
         case DisplayMode::ModeTime:
             m_eDisplayMode = DisplayMode::ModePosition;
             break;
         case DisplayMode::ModePosition:
-            m_eDisplayMode = DisplayMode::ModeSpeed;
-            break;
-        case DisplayMode::ModeSpeed:
             m_eDisplayMode = DisplayMode::ModeFull;
             break;
         }
@@ -512,8 +512,43 @@ void GPS_OLED::drawClock(uint x, uint y, uint radius, std::string strTime)
     }
     // Draw the hands
     m_spDisplay->Line(xCenter, yCenter, xCenter + dxs, yCenter + dys, secondHandColor);
-    m_spDisplay->Line(xCenter, yCenter, xCenter + dxh, yCenter + dyh, handColor);
-    m_spDisplay->Line(xCenter, yCenter, xCenter + dxm, yCenter + dym, handColor);
+    auto drawThickHand = [this, xCenter, yCenter, handColor](int dx, int dy)
+    {
+        int xTip = xCenter + dx;
+        int yTip = yCenter + dy;
+        int x = xCenter;
+        int y = yCenter;
+        int deltaX = abs(xTip - x);
+        int stepX = (x < xTip) ? 1 : -1;
+        int deltaY = -abs(yTip - y);
+        int stepY = (y < yTip) ? 1 : -1;
+        int error = deltaX + deltaY;
+
+        while (true)
+        {
+            if (x == xTip && y == yTip)
+            {
+                m_spDisplay->SetPixel(x, y, handColor);
+                break;
+            }
+
+            m_spDisplay->FillRect(x - 1, y - 1, 3, 3, handColor);
+
+            int doubledError = 2 * error;
+            if (doubledError >= deltaY)
+            {
+                error += deltaY;
+                x += stepX;
+            }
+            if (doubledError <= deltaX)
+            {
+                error += deltaX;
+                y += stepY;
+            }
+        }
+    };
+    drawThickHand(dxh, dyh);
+    drawThickHand(dxm, dym);
     // m_spDisplay->ellipse(xCenter, yCenter, 1, 1, faceColor, true);
 }
 
