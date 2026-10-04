@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) 2025-2026 Erik Tkal
  *
@@ -22,9 +21,9 @@
  */
 
 #include <iostream>
+#include <limits>
 
 #include "pico/stdlib.h"
-#include "hardware/adc.h"
 
 #if defined(PLATFORM_PICO_W)
 #include "pico/cyw43_arch.h"
@@ -33,6 +32,7 @@
 #include "gps_oled.h"
 #include "gps_uart.h"
 #include "timemgr.h"
+#include "log.h"
 
 #if defined(GPS_ON_CORE_1) && defined(DISPLAY_ON_CORE_1)
 #error "GPS_ON_CORE_1 and DISPLAY_ON_CORE_1 cannot both be defined"
@@ -42,6 +42,7 @@
 #define PIN_UART0_TX 0     // Default is 0
 #define PIN_UART0_RX 1     // Default is 1
 
+#if defined(ECHO_TO_UART1) && !defined(PICO_DEBUGPROBE)
 #if defined(WAVESHARE_RP2040_ZERO)
 #define UART1_DEVICE uart1 // uart1 for echo
 #define PIN_UART1_TX 4
@@ -50,6 +51,7 @@
 #define UART1_DEVICE uart1 // uart1 for echo
 #define PIN_UART1_TX 8
 #define PIN_UART1_RX 9
+#endif
 #endif
 
 #define UART_BAUD_RATE 9600
@@ -67,11 +69,31 @@
 #define PIN_SCL    PICO_DEFAULT_I2C_SCL_PIN
 #endif
 
-// #define USE_WS2812_PIN 12 // Override
+#define USE_WS2812_PIN 16 // Override
 // #define USE_LED_PIN 16    // Override
 
 // GPIO pin for a button
 #define PIN_BUTTON 6
+
+namespace
+{
+    constexpr uint64_t timeSyncRetryIntervalSec = 5 * 60;
+} // namespace
+
+#if !defined(NDEBUG)
+// Used in debug builds to check for memory leaks
+#include <malloc.h>
+static uint32_t getTotalHeap()
+{
+    extern char __StackLimit, __bss_end__;
+    return &__StackLimit - &__bss_end__;
+}
+static uint32_t getFreeHeap()
+{
+    struct mallinfo m = mallinfo();
+    return getTotalHeap() - m.uordblks;
+}
+#endif
 
 extern "C"
 {
@@ -85,12 +107,17 @@ extern "C"
 
 int main()
 {
+#if !defined(PICO_DEBUGPROBE)
     stdio_usb_init();
-    adc_init();
+#else
+    stdio_init_all(); // Use this for debugprobe
+#endif
 
 #if !defined(NDEBUG)
     timer_hw->dbgpause = 0;
     sleep_ms(5000);
+#else
+    sleep_ms(1000);
 #endif
 
 #if defined(PLATFORM_PICO_W)
@@ -142,7 +169,7 @@ int main()
     spButton->Initialize();
 #endif
 
-    LogInfo("Creating GPS object...");
+    LogInfo("Creating GPS objects...");
 
     // Create the GPS object
     GPS_UART::Shared spGPS = std::make_shared<GPS_UART>();
@@ -151,16 +178,91 @@ int main()
     spGPS->SetOutputUART(UART1_DEVICE, PIN_UART1_TX, PIN_UART1_RX, DATA_BITS, STOP_BITS, PARITY, UART_BAUD_RATE);
 #endif
 
-    LogInfo("Creating display object...");
+    LogInfo("Creating display objects...");
     // Create the display
     SSD1306::Shared spDisplay = std::make_shared<SSD1306_I2C>(128, 64, I2C_DEVICE, PIN_SDA, PIN_SCL);
-
     // Create the GPS_OLED display object
-    GPS_OLED::Shared spDevice = std::make_shared<GPS_OLED>(spDisplay, spGPS, spLED, spButton);
+    GPS_OLED::Shared spDevice = std::make_shared<GPS_OLED>(spDisplay, spGPS, spButton);
 
-    spDevice->Initialize();
-    // Run the show
-    spDevice->Run();
+    // Start the GPS acquisition, might be local or on core 1
+    spGPS->Start();
+    // Start the GPS_OLED device
+    spDevice->Start();
+
+    uint64_t nLastTimeSyncAttemptSec = std::numeric_limits<uint64_t>::max();
+    GPS_OLED_Status deviceStatus;
+    uint64_t prevNowSecond = TimeMgr::CurrentEpochSeconds();
+
+    while (true)
+    {
+        // Set the LED state based on GPS position or other criteria
+        if (spLED)
+        {
+            spLED->DoWork(); // Handle any outstanding work (e.g. turn off blink)
+        }
+
+        spGPS->DoWork(); // Process the GPS
+
+        spDevice->DoWork(); // Process the GPS_OLED and display
+
+        // Check if the device has received new data, limits the frequency of time synchronization attempts, etc.
+        if (spDevice->GetStatus(deviceStatus))
+        {
+            // Update the system time if necessary
+            if (!deviceStatus.strGpsTimeRaw.empty() && !deviceStatus.strGpsDateRaw.empty())
+            {
+                const uint64_t uptimeSec = time_us_64() / 1000000;
+                const bool bNeverRetried = (nLastTimeSyncAttemptSec == std::numeric_limits<uint64_t>::max());
+                const bool bUpdateDue = !TimeMgr::IsWallClockValid() || bNeverRetried ||
+                                        (uptimeSec - nLastTimeSyncAttemptSec >= timeSyncRetryIntervalSec); // ||
+                // !TimeMgr::IsGpsTimeDateWithinOneSecond(strGPSTimeRaw, strGPSDateRaw);
+                if (bUpdateDue)
+                {
+                    nLastTimeSyncAttemptSec = uptimeSec;
+                    LogInfo("Attempting GPS time sync");
+                    if (TimeMgr::SetTimeFromGps(deviceStatus.strGpsTimeRaw, deviceStatus.strGpsDateRaw))
+                    {
+                        LogInfo("GPS time synchronized");
+                    }
+                }
+            }
+        }
+
+        // Blink the LED here based on the device status.
+        if (spLED)
+        {
+            uint64_t nowSecond = TimeMgr::CurrentEpochSeconds();
+            if (nowSecond != prevNowSecond)
+            {
+                prevNowSecond = nowSecond;
+
+                if (deviceStatus.strGpsTimeRaw.empty())
+                {
+                    spLED->SetPixel(0, led_red);
+                    spLED->Blink_ms(0, 500);
+                }
+                else
+                {
+                    if (deviceStatus.bHasPosition)
+                    {
+                        spLED->SetPixel(0, deviceStatus.bExternalAntenna ? led_blue : led_green);
+                    }
+                    else
+                    {
+                        spLED->SetPixel(0, deviceStatus.bExternalAntenna ? led_magenta : led_red);
+                    }
+                    spLED->Blink_ms(0, 50);
+                }
+
+#if !defined(NDEBUG)
+                LogInfo("Total Heap: " + std::to_string(getTotalHeap()) + "  Free Heap: " + std::to_string(getFreeHeap()));
+#endif
+            }
+        }
+
+        tight_loop_contents();
+    }
+
 
 #if defined(PLATFORM_PICO_W)
     cyw43_arch_deinit();

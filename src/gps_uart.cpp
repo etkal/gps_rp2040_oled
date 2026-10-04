@@ -31,7 +31,8 @@
 
 #include "hardware/dma.h"
 #include "hardware/irq.h"
-#include "timemgr.h"
+
+#include "log.h"
 
 // Static members for RX
 GPS_UART* GPS_UART::sm_pGPS = nullptr;
@@ -148,14 +149,14 @@ void GPS_UART::Initialize()
                           0xFFFFFFFF,                  // effectively never stop; ring mode wraps the address
                           true);                       // start immediately
 
-#if defined(ANTENNA_STATUS_REQUEST_REPEAT)
+#if defined(ANTENNA_STATUS_REQUEST_REPEAT_SECONDS)
     // Set up a timer to send antenna status commands to the GPS device periodically, starting after 5 seconds.
     m_spSendAntennaStatusTimer = std::make_shared<DelayedRepeatingTimer>(
         5000,
-        ANTENNA_STATUS_REQUEST_REPEAT * 1000,
+        ANTENNA_STATUS_REQUEST_REPEAT_SECONDS * 1000,
         [this]() {
             m_bSendExternalAntennaStatusRequest = true;
-#if ANTENNA_STATUS_REQUEST_REPEAT == 0
+#if ANTENNA_STATUS_REQUEST_REPEAT_SECONDS == 0
             m_spSendAntennaStatusTimer->Stop(); // Stop the timer if the repeat interval is 0
 #endif
         },
@@ -166,6 +167,7 @@ void GPS_UART::Initialize()
     LogInfo("GPS_UART initialization complete.");
 }
 
+#if defined(ANTENNA_STATUS_REQUEST_REPEAT_SECONDS)
 void GPS_UART::sendExternalAntennaStatusRequest()
 {
     LogInfo("Sending antenna status commands to GPS device...");
@@ -175,6 +177,7 @@ void GPS_UART::sendExternalAntennaStatusRequest()
     uart_puts(GetInputUART(), strPGCMD.c_str());
     uart_puts(GetInputUART(), strCDCMD.c_str());
 }
+#endif
 
 // Use this callback from the base class in order to echo sentences received from the
 // GPS device to the output UART (if set).
@@ -260,14 +263,14 @@ bool GPS_UART::getSentence(std::string& strSentence)
         }
     }
 
-#if defined(ANTENNA_STATUS_REQUEST_REPEAT)
+#if defined(ANTENNA_STATUS_REQUEST_REPEAT_SECONDS)
     // Check if we are supposed to send antenna status request commands
     if (m_bSendExternalAntennaStatusRequest)
     {
         sendExternalAntennaStatusRequest();
         m_bSendExternalAntennaStatusRequest = false;
     }
-#endif
+#endif // defined(ANTENNA_STATUS_REQUEST_REPEAT_SECONDS)
 
     return bFound;
 }

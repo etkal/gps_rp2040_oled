@@ -81,20 +81,18 @@ public:
     static LED::Shared GetLED(uint nLEDIndex = 0);
 
 protected:
-    repeating_timer_t m_LedTimer {};
-    bool m_bUpdateRequested {false};
-    static bool ledOffTimerCallback(repeating_timer_t* pTimer);
+    class BlinkContext
+    {
+    public:
+        uint64_t offTime {};
+    };
+
+    std::vector<BlinkContext> m_BlinkContexts;
+    explicit LED(uint numPixels);
 
 private:
     static std::deque<LED::Shared> sm_mapLEDs;
     size_t m_nIndexInMapLEDs {0};
-};
-
-class BlinkContext
-{
-public:
-    std::shared_ptr<LED> spLED;
-    uint idx;
 };
 
 class LED_pico : public LED

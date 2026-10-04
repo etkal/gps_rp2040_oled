@@ -18,7 +18,7 @@
 
 #include "pico/stdlib.h"
 
-#include "timemgr.h"
+#include "timers.h"
 
 enum class ButtonEvent
 {
@@ -46,6 +46,7 @@ public:
 private:
     static void irqHandler(uint gpio, uint32_t events);
     void onDebounceTimer();
+    void onLongPressTimer();
 
     uint m_nPin {0};
     uint m_nDebounceMs {0};
@@ -53,7 +54,9 @@ private:
     uint m_nLongPressMs {0};
 
     AlarmTimer m_debounceTimer;
-    bool m_bPressed {false}; // debounced logical state (true = pressed)
+    AlarmTimer m_longPressTimer;
+    bool m_bLongPressFired {false}; // long press reported while still held
+    bool m_bPressed {false};        // debounced logical state (true = pressed)
     uint64_t m_nPressStartTime {0};
 
     eventCallback m_pEventCB {nullptr};

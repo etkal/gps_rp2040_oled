@@ -16,7 +16,7 @@
 
 #include "pico/sync.h"
 
-#include "timemgr.h"
+#include "timers.h"
 
 class SatInfo
 {
@@ -66,7 +66,6 @@ public:
           strSpeedKts(rhs.strSpeedKts),
           strSpeedKph(rhs.strSpeedKph),
           strSpeedMph(rhs.strSpeedMph),
-          strVsys(rhs.strVsys),
           mSatList(rhs.mSatList),
           vUsedList(rhs.vUsedList)
     {
@@ -89,7 +88,6 @@ public:
     std::string strSpeedKts;
     std::string strSpeedKph;
     std::string strSpeedMph;
-    std::string strVsys;
     SatList mSatList;
     UsedList vUsedList;
 };
@@ -98,7 +96,7 @@ typedef void (*sentenceCallback)(void* pCtx, std::string strSentence);
 typedef void (*gpsDataCallback)(void* pCtx, GPSData::Shared spGPSData);
 typedef void (*messageCallback)(void* pCtx, std::string strMessage);
 
-class GPS
+class GPS : public std::enable_shared_from_this<GPS>
 {
 public:
     typedef std::shared_ptr<GPS> Shared;
@@ -108,8 +106,9 @@ public:
 
     // Derived classes can perform their own initialization and also invoke the base class function
     virtual void Initialize();
+    void Start();
     void Run();
-    void RunOnce();
+    void DoWork();
     void Stop();
 
     void SetSentenceCallback(void* pCtx, sentenceCallback pCB);
@@ -136,6 +135,7 @@ private:
 
     // GPS object members
     bool m_bExit {false};
+    bool m_bInitialized {false};
     bool m_bGSVInProgress {false};
     std::string m_strNumGSV;
     uint64_t m_nSatListTime {0};
