@@ -67,7 +67,7 @@ void GPS_OLED::Initialize()
     // Initialize display with desired font (best is Terminus 12, anything larger is not recommended)
     m_spDisplay->SetFont(get_terminus_font(12));
 
-    m_spDisplay->SetContrast(0x10);
+    m_spDisplay->SetContrast(0xFF);
     m_bShowWaitingForGPS = true;
 
     m_spGPS->SetGpsDataCallback(this, gpsDataCB);
@@ -512,8 +512,7 @@ void GPS_OLED::drawClock(uint x, uint y, uint radius, std::string strTime)
     }
     // Draw the hands
     m_spDisplay->Line(xCenter, yCenter, xCenter + dxs, yCenter + dys, secondHandColor);
-    auto drawThickHand = [this, xCenter, yCenter, handColor](int dx, int dy)
-    {
+    auto drawThickHand = [this, xCenter, yCenter, handColor](int dx, int dy) {
         int xTip = xCenter + dx;
         int yTip = yCenter + dy;
         int x = xCenter;
