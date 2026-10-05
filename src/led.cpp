@@ -163,9 +163,10 @@ void LED_pico::SetPixel(uint idx, uint32_t color, uint8_t brightness)
     {
         for (auto i : m_vIgnore)
         {
-            if (i == m_nColor)
+            if (i == color)
             {
-                m_nColor = led_off;
+                color = led_off;
+                return;
             }
         }
         m_nColor = color;

@@ -37,7 +37,7 @@ enum class SpeedUnit
     Knots
 };
 
-class GPS_OLED_Status
+class GPS_Status
 {
 public:
     bool bHasPosition {false};
@@ -68,7 +68,7 @@ public:
     void Run();
     void DoWork();
     void Stop();
-    bool GetStatus(GPS_OLED_Status& status);
+    bool GetStatus(GPS_Status& status);
 
 private:
     static void gpsDataCB(void* pCtx, GPSData::Shared spGPSData);
@@ -144,8 +144,7 @@ private:
     GPS::Shared m_spGPS;
     Button::Shared m_spButton;
     queue_t m_qIncomingGPSData;       // Queue of GPS data from the source
-    queue_t m_qDisplayGPSData;        // Queue of GPS data to be displayed
-    GPSData::Shared m_spLastGPSData;  // Last GPS data seen on core 0, for immediate button-triggered redraws
+    GPSData::Shared m_spLastGPSData;  // Last GPS data seen, for immediate button-triggered redraws
     AlarmTimer::Shared m_spIdleTimer; // Timer to detect lack of GPS data
     bool m_bShowWaitingForGPS {false};
     bool m_bHasPosition {false};

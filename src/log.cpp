@@ -29,7 +29,7 @@
 
 #include "timemgr.h"
 
-static void logInfo(const std::string& message)
+static inline void logInfo(const std::string& message)
 {
     std::stringstream ss;
     ss << "<" << get_core_num() << ">[" << TimeMgr::FormatCurrentTimestamp() << "] " << message << std::endl;

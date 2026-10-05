@@ -32,8 +32,6 @@
 #include "pico/stdlib.h"
 #include "pico/double.h"
 #include "pico/multicore.h"
-#include "hardware/gpio.h"
-#include "hardware/uart.h"
 
 #include "ssd1306.h"
 #include "font_factory.h"
@@ -63,7 +61,6 @@ void GPS_OLED::Initialize()
 {
     m_bInitialized = true;
     queue_init(&m_qIncomingGPSData, sizeof(GPSData::Shared*), 10); // Initialize the queue with a capacity of 10
-    queue_init(&m_qDisplayGPSData, sizeof(GPSData::Shared*), 10);  // Initialize the queue with a capacity of 10
 
     m_spDisplay->Initialize();
 
@@ -71,11 +68,14 @@ void GPS_OLED::Initialize()
     m_spDisplay->SetFont(get_terminus_font(12));
 
     m_spDisplay->SetContrast(0x10);
-    showScreenMessage("Waiting for GPS data");
+    m_bShowWaitingForGPS = true;
 
     m_spGPS->SetGpsDataCallback(this, gpsDataCB);
     m_spGPS->SetMessageCallback(this, messageCB);
-    m_spButton->SetEventCallback(this, buttonEventCB);
+    if (m_spButton)
+    {
+        m_spButton->SetEventCallback(this, buttonEventCB);
+    }
 
     m_spIdleTimer = std::make_shared<AlarmTimer>([this]() {
         m_bShowWaitingForGPS = true;
@@ -141,7 +141,7 @@ void GPS_OLED::DoWork()
         if (spGPSData)
         {
             LogInfoD("GPS_OLED - Processing new GPS data");
-            // Perform operations that need to run on core 0 (main core)
+            m_bShowWaitingForGPS = false;
             critical_section_enter_blocking(&m_CallbackCs);
             m_bStatusChanged = true;
             m_bHasPosition = spGPSData->bHasPosition;
@@ -175,7 +175,7 @@ void GPS_OLED::Stop()
     m_bExit = true;
 }
 
-bool GPS_OLED::GetStatus(GPS_OLED_Status& status)
+bool GPS_OLED::GetStatus(GPS_Status& status)
 {
     critical_section_enter_blocking(&m_CallbackCs);
     if (!m_bStatusChanged)

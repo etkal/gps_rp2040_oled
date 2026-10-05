@@ -190,7 +190,7 @@ int main()
     spDevice->Start();
 
     uint64_t nLastTimeSyncAttemptSec = std::numeric_limits<uint64_t>::max();
-    GPS_OLED_Status deviceStatus;
+    GPS_Status deviceStatus;
     uint64_t prevNowSecond = TimeMgr::CurrentEpochSeconds();
 
     while (true)
