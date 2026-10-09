@@ -9,6 +9,7 @@ target_sources(gps_oled PUBLIC
     led.cpp
     log.cpp
     main.cpp
+    powermgr.cpp
     timers.cpp
     timemgr.cpp
 )

@@ -70,20 +70,6 @@ public:
     void Rotate(bool bRotate);
     void Show();
 
-    // Framebuff shim methods
-    void SetPixel(int x, int y, uint16_t color);
-    uint16_t GetPixel(int x, int y);
-    void FillRect(int x, int y, int w, int h, uint16_t color);
-    void Fill(uint16_t color);
-    void HLine(int x, int y, int w, uint16_t color);
-    void VLine(int x, int y, int h, uint16_t color);
-    void Rect(int x, int y, int w, int h, uint16_t color, bool bFill = false);
-    void Line(int x1, int y1, int x2, int y2, uint16_t color);
-    void Ellipse(int cx, int cy, int xradius, int yradius, uint16_t color, bool bFill = false, uint8_t mask = ELLIPSE_MASK_ALL);
-    void Text(const char* str, int x, int y, uint16_t color);
-    void Text(const char* str, int x, int y, uint16_t color, int scale);
-    void Text(const char* str, int x, int y, uint16_t color, const BitmapFont& font, int scale = 1);
-
     uint16_t Width()
     {
         return m_dispWidth;
