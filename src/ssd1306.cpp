@@ -145,66 +145,6 @@ void SSD1306::Show()
     write_data(reinterpret_cast<uint8_t*>(buffer()), buflen);
 }
 
-void SSD1306::SetPixel(int x, int y, uint16_t color)
-{
-    return Framebuf::setpixel(x, y, color);
-}
-
-uint16_t SSD1306::GetPixel(int x, int y)
-{
-    return Framebuf::getpixel(x, y);
-}
-
-void SSD1306::FillRect(int x, int y, int w, int h, uint16_t color)
-{
-    return Framebuf::fillrect(x, y, w, h, color);
-}
-
-void SSD1306::Fill(uint16_t color)
-{
-    return Framebuf::fill(color);
-}
-
-void SSD1306::HLine(int x, int y, int w, uint16_t color)
-{
-    return Framebuf::hline(x, y, w, color);
-}
-
-void SSD1306::VLine(int x, int y, int h, uint16_t color)
-{
-    return Framebuf::vline(x, y, h, color);
-}
-
-void SSD1306::Rect(int x, int y, int w, int h, uint16_t color, bool bFill)
-{
-    return Framebuf::rect(x, y, w, h, color, bFill);
-}
-
-void SSD1306::Line(int x1, int y1, int x2, int y2, uint16_t color)
-{
-    return Framebuf::line(x1, y1, x2, y2, color);
-}
-
-void SSD1306::Ellipse(int cx, int cy, int xradius, int yradius, uint16_t color, bool bFill, uint8_t mask)
-{
-    return Framebuf::ellipse(cx, cy, xradius, yradius, color, bFill, mask);
-}
-
-void SSD1306::Text(const char* str, int x, int y, uint16_t color)
-{
-    return Framebuf::text(str, x, y, color);
-}
-
-void SSD1306::Text(const char* str, int x, int y, uint16_t color, int scale)
-{
-    return text(str, x, y, color, scale);
-}
-
-void SSD1306::Text(const char* str, int x, int y, uint16_t color, const BitmapFont& font, int scale)
-{
-    return text(str, x, y, color, font, scale);
-}
-
 //
 // SSD1306_I2C
 //

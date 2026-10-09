@@ -32,6 +32,7 @@
 #include "gps_oled.h"
 #include "gps_uart.h"
 #include "timemgr.h"
+#include "powermgr.h"
 #include "log.h"
 
 #if defined(GPS_ON_CORE_1) && defined(DISPLAY_ON_CORE_1)
@@ -69,7 +70,7 @@
 #define PIN_SCL    PICO_DEFAULT_I2C_SCL_PIN
 #endif
 
-#define USE_WS2812_PIN 16 // Override
+// #define USE_WS2812_PIN 16 // Override
 // #define USE_LED_PIN 16    // Override
 
 // GPIO pin for a button
@@ -128,7 +129,17 @@ int main()
     }
 #endif
 
-    TimeMgr::InitializeSingleton(TIME_ZONE); // Needed for logging timestamps
+    TimeMgr::InitializeSingleton(TIME_ZONE);
+
+#if defined(DISPLAY_VSYS_VOLTAGE)
+#if defined(ADC_GPIO_PIN)
+    PowerMgr::InitializeSingleton(ADC_GPIO_PIN); // Initialize the power manager with the specified ADC GPIO pin
+#elif defined(PICO_VSYS_PIN)
+    PowerMgr::InitializeSingleton(PICO_VSYS_PIN); // Initialize the power manager with the VSYS pin
+#endif
+#endif // DISPLAY_VSYS_VOLTAGE
+    auto spPowerMgr = PowerMgr::GetInstance();
+
     LogInfo("Starting GPS OLED application...");
 
 #if defined(SEEED_XIAO_RP2040)
@@ -195,7 +206,6 @@ int main()
 
     while (true)
     {
-        // Set the LED state based on GPS position or other criteria
         if (spLED)
         {
             spLED->DoWork(); // Handle any outstanding work (e.g. turn off blink)
@@ -203,7 +213,7 @@ int main()
 
         spGPS->DoWork(); // Process the GPS
 
-        spDevice->DoWork(); // Process the GPS_OLED and display
+        spDevice->DoWork(); // Process the GPS_OLED and display (noop if it is autonomous on core 1)
 
         // Check if the device has received new data, limits the frequency of time synchronization attempts, etc.
         if (spDevice->GetStatus(deviceStatus))
@@ -228,14 +238,15 @@ int main()
             }
         }
 
-        // Blink the LED here based on the device status.
-        if (spLED)
+        // Perform actions you want to occur once per second
+        uint64_t nowSecond = TimeMgr::CurrentEpochSeconds();
+        if (nowSecond != prevNowSecond)
         {
-            uint64_t nowSecond = TimeMgr::CurrentEpochSeconds();
-            if (nowSecond != prevNowSecond)
-            {
-                prevNowSecond = nowSecond;
+            prevNowSecond = nowSecond;
 
+            // Set or blink the LED here based on the device status.
+            if (spLED)
+            {
                 if (deviceStatus.strGpsTimeRaw.empty())
                 {
                     spLED->SetPixel(0, led_red);
@@ -253,16 +264,25 @@ int main()
                     }
                     spLED->Blink_ms(0, 50);
                 }
+            }
+
+            // If configured, check the power source voltage and status.
+            if (spPowerMgr)
+            {
+                auto fVoltage = spPowerMgr->GetVoltage(true);
+                auto bUsingBattery = spPowerMgr->UsingBattery();
+
+                if (0.0f != fVoltage)
+                {
+                    LogInfoD("Battery Voltage: " + std::to_string(fVoltage) + "  Using Battery: " + std::to_string(bUsingBattery));
+                }
+            }
 
 #if !defined(NDEBUG)
-                LogInfo("Total Heap: " + std::to_string(getTotalHeap()) + "  Free Heap: " + std::to_string(getFreeHeap()));
+            LogInfo("Total Heap: " + std::to_string(getTotalHeap()) + "  Free Heap: " + std::to_string(getFreeHeap()));
 #endif
-            }
         }
-
-        tight_loop_contents();
     }
-
 
 #if defined(PLATFORM_PICO_W)
     cyw43_arch_deinit();

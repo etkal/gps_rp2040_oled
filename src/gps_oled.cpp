@@ -37,6 +37,7 @@
 #include "font_factory.h"
 #include "log.h"
 #include "timemgr.h"
+#include "powermgr.h"
 
 #define SAT_ICON_RADIUS 2
 
@@ -229,15 +230,15 @@ bool GPS_OLED::handleButtonEvent()
     }
     if (ButtonEvent::Tap == m_eLastButtonEvent)
     {
-        LogInfoD("GPS_OLED - Button tap detected");
+        LogInfoD("Button tap detected");
     }
     else if (ButtonEvent::Press == m_eLastButtonEvent)
     {
-        LogInfoD("GPS_OLED - Button press detected");
+        LogInfoD("Button press detected");
     }
     else if (ButtonEvent::LongPress == m_eLastButtonEvent)
     {
-        LogInfoD("GPS_OLED - Long button press detected");
+        LogInfoD("Long button press detected");
     }
 
     switch (m_eLastButtonEvent)
@@ -312,7 +313,6 @@ void GPS_OLED::gpsDataCB(void* pCtx, GPSData::Shared spGPSData)
     }
 
     // Deep copy the GPSData once here; all subsequent hand-offs share ownership of this copy.
-    LogInfoD("GPS_OLED - Enqueueing GPS data");
     enqueueGPSData(pThis->m_qIncomingGPSData, std::make_shared<GPSData>(*spGPSData));
 }
 
@@ -410,6 +410,41 @@ void GPS_OLED::drawFullUI(GPSData::Shared spGPSData)
     m_spDisplay->Fill(COLOUR_BLACK);
     m_spDisplay->SetFont(get_terminus_font(12));
 
+    // Get battery voltage if available
+    std::string strVoltage;
+    auto spPowerMgr = PowerMgr::GetInstance();
+    if (spPowerMgr)
+    {
+        static std::vector<uint32_t> s_vVoltageSamples;
+        // Integer formatting: float/double via std::to_string yields 0 when run on core 1
+        uint32_t uVoltage_mV = spPowerMgr->GetVoltage_mV();
+        if (uVoltage_mV != 0)
+        {
+            // Use a rolling average of the last 10 voltage samples
+            if (s_vVoltageSamples.size() >= 10)
+            {
+                s_vVoltageSamples.erase(s_vVoltageSamples.begin());
+            }
+            s_vVoltageSamples.push_back(uVoltage_mV);
+            uVoltage_mV = 0; // Reset before summing the samples
+            for (auto v : s_vVoltageSamples)
+            {
+                uVoltage_mV += v;
+            }
+            uVoltage_mV /= s_vVoltageSamples.size();
+
+            auto szUsingBattery = spPowerMgr->UsingBattery() ? "b" : "v";
+            char szVoltage[16];
+            snprintf(szVoltage,
+                     sizeof(szVoltage),
+                     "%s: %lu.%02lu",
+                     szUsingBattery,
+                     (unsigned long)(uVoltage_mV / 1000),
+                     (unsigned long)((uVoltage_mV % 1000) / 10));
+            strVoltage = szVoltage;
+        }
+    }
+
     // Draw satellite grid
     drawSatGrid(spGPSData, nWidth / 4 + getCharWidth(), nHeight / 2, nHeight / 2 - getCharHeight() / 2, 2);
 
@@ -429,6 +464,9 @@ void GPS_OLED::drawFullUI(GPSData::Shared spGPSData)
     {
         drawText(-1, spGPSData->strGPSTime, COLOUR_WHITE, true, X_PAD);
     }
+
+    // Draw battery voltage if available
+    drawText(4, strVoltage.c_str(), COLOUR_WHITE, true, X_PAD);
 
     // blit the framebuf to the display
     m_spDisplay->Show();
@@ -468,6 +506,24 @@ void GPS_OLED::drawSatGrid(const GPSData::Shared& spGPSData, uint xCenter, uint 
             }
         }
     }
+}
+
+void GPS_OLED::drawCircleSat(uint gridCenterX,
+                             uint gridCenterY,
+                             uint nGridRadius,
+                             float elrad,
+                             float azrad,
+                             uint satRadius,
+                             uint16_t color,
+                             uint16_t fillColor)
+{
+    // Draw satellite (fill first, then draw open circle)
+    int dx = (nGridRadius - SAT_ICON_RADIUS) * cos(elrad) * sin(azrad);
+    int dy = (nGridRadius - SAT_ICON_RADIUS) * cos(elrad) * -cos(azrad);
+    int x = gridCenterX + dx;
+    int y = gridCenterY + dy;
+    m_spDisplay->Ellipse(x, y, satRadius, satRadius, fillColor, true); // Clear area with fill
+    m_spDisplay->Ellipse(x, y, satRadius, satRadius, color);           // Draw circle without fill
 }
 
 void GPS_OLED::drawClock(uint x, uint y, uint radius, std::string strTime)
@@ -549,24 +605,6 @@ void GPS_OLED::drawClock(uint x, uint y, uint radius, std::string strTime)
     drawThickHand(dxh, dyh);
     drawThickHand(dxm, dym);
     // m_spDisplay->ellipse(xCenter, yCenter, 1, 1, faceColor, true);
-}
-
-void GPS_OLED::drawCircleSat(uint gridCenterX,
-                             uint gridCenterY,
-                             uint nGridRadius,
-                             float elrad,
-                             float azrad,
-                             uint satRadius,
-                             uint16_t color,
-                             uint16_t fillColor)
-{
-    // Draw satellite (fill first, then draw open circle)
-    int dx = (nGridRadius - SAT_ICON_RADIUS) * cos(elrad) * sin(azrad);
-    int dy = (nGridRadius - SAT_ICON_RADIUS) * cos(elrad) * -cos(azrad);
-    int x = gridCenterX + dx;
-    int y = gridCenterY + dy;
-    m_spDisplay->Ellipse(x, y, satRadius, satRadius, fillColor, true); // Clear area with fill
-    m_spDisplay->Ellipse(x, y, satRadius, satRadius, color);           // Draw circle without fill
 }
 
 int GPS_OLED::linePos(int nLine)

@@ -49,11 +49,9 @@ public:
 
 // GPS_OLED class
 //
-// This combines an OLED display, GPS module and LED.
-// The devices are initialized here and then callbacks are set up in order
-// to receive data from the GPS, and the resulting data is displayed
-// and the LED can be used to indicate a position lock and/or other
-// status.
+// This represents an OLED display showing information from a GPS module.
+// The device is initialized here and then callbacks are set up in order
+// to receive data from the GPS, and the resulting data is displayed.
 //
 class GPS_OLED : public std::enable_shared_from_this<GPS_OLED>
 {
@@ -130,12 +128,6 @@ private:
     {
         const BitmapFont* pFont = GetFont();
         return pFont ? pFont->effectiveLineAdvance() : 8;
-    }
-
-    inline uint getLineAdjustment() const
-    {
-        const BitmapFont* pFont = GetFont();
-        return pFont ? pFont->effectiveLineAdvance() - pFont->lineAdvance : 8;
     }
 
     bool m_bExit {false};
