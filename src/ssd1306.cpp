@@ -26,22 +26,27 @@
 
 #include "ssd1306.h"
 
+// Currently only 1 quadrant is supported. Would need to rewrite the Show() method
+// below to take into account offsets to support multiple quadrants.
+#if !defined(DISPLAY_QUADRANTS)
+#define DISPLAY_QUADRANTS 1
+#endif
+#if DISPLAY_QUADRANTS != 1
+#error "Only DISPLAY_QUADRANTS == 1 is supported" 
+#endif
 
 SSD1306::SSD1306(uint nWidth, uint nHeight, bool bExternalVcc)
-    : m_dispWidth(nWidth),
-      m_dispHeight(nHeight),
+    : Display(nWidth, nHeight),
       m_bExternalVcc(bExternalVcc),
       m_nPages(nHeight / 8)
 {
-}
-
-void SSD1306::Reset()
-{
+    m_nQuadrants = DISPLAY_QUADRANTS;
+    m_eQuadrant = FULL_FRAME;
 }
 
 void SSD1306::Initialize()
 {
-    Framebuf::Initialize(m_dispWidth, m_dispHeight, MVLSB);
+    initializeFramebuf(MVLSB, false);
 
     initInternal();
 
@@ -95,6 +100,29 @@ void SSD1306::Initialize()
     // this is necessary as memory writes will corrupt if scrolling was enabled
 
     write_cmd(OLED_SET_DISP | 0x01); // turn display on
+
+    SetContrast(0xFF);
+}
+
+void SSD1306::Show()
+{
+    uint8_t x0 = 0;
+    uint8_t x1 = m_dispWidth - 1;
+    if (m_dispWidth != 128)
+    {
+        // narrow displays use centred columns
+        uint col_offset = (128 - m_dispWidth) / 2;
+        x0 += col_offset;
+        x1 += col_offset;
+    }
+    write_cmd(OLED_SET_COL_ADDR);
+    write_cmd(x0);
+    write_cmd(x1);
+    write_cmd(OLED_SET_PAGE_ADDR);
+    write_cmd(0);
+    write_cmd(m_nPages - 1);
+    uint buflen = (x1 - x0 + 1) * m_nPages;
+    write_data(reinterpret_cast<uint8_t*>(buffer()), buflen);
 }
 
 void SSD1306::DisplayOff()
@@ -122,27 +150,6 @@ void SSD1306::Rotate(bool bRotate)
 {
     write_cmd(OLED_SET_COM_OUT_DIR | (bRotate ? 0x08 : 0x00)); // set COM (common) output scan direction
     write_cmd(OLED_SET_SEG_REMAP | (bRotate ? 0x01 : 0x00));   // set segment re-map
-}
-
-void SSD1306::Show()
-{
-    uint8_t x0 = 0;
-    uint8_t x1 = m_dispWidth - 1;
-    if (m_dispWidth != 128)
-    {
-        // narrow displays use centred columns
-        uint col_offset = (128 - m_dispWidth) / 2;
-        x0 += col_offset;
-        x1 += col_offset;
-    }
-    write_cmd(OLED_SET_COL_ADDR);
-    write_cmd(x0);
-    write_cmd(x1);
-    write_cmd(OLED_SET_PAGE_ADDR);
-    write_cmd(0);
-    write_cmd(m_nPages - 1);
-    uint buflen = (x1 - x0 + 1) * m_nPages;
-    write_data(reinterpret_cast<uint8_t*>(buffer()), buflen);
 }
 
 //

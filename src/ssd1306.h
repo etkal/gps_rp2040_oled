@@ -9,8 +9,11 @@
 
 #pragma once
 
+#include <memory>
+
 #include <hardware/i2c.h>
-#include "framebuf.h"
+
+#include "display.h"
 #include "font.h"
 
 // Register definitions
@@ -47,13 +50,7 @@
 #define OLED_WRITE_MODE          0xFE
 #define OLED_READ_MODE           0xFF
 
-// All colours for this display are white
-constexpr auto COLOUR_WHITE = 1;
-constexpr auto COLOUR_BLACK = 0;
-constexpr auto COLOUR_BLUE = 1;
-constexpr auto COLOUR_RED = 1;
-
-class SSD1306 : public Framebuf
+class SSD1306 : public Display
 {
 public:
     typedef std::shared_ptr<SSD1306> Shared;
@@ -61,31 +58,21 @@ public:
     SSD1306(uint nWidth, uint nHeight, bool bExternalVcc);
     virtual ~SSD1306() = default;
 
-    void Reset();
-    void Initialize();
+    void Initialize() override;
+    void Show() override;
+    uint RecommendedFontSize() const override {return 12;}
+
     void DisplayOff();
     void DisplayOn();
     void SetContrast(uint8_t contrast);
     void Invert(bool bInvert);
     void Rotate(bool bRotate);
-    void Show();
-
-    uint16_t Width()
-    {
-        return m_dispWidth;
-    }
-    uint16_t Height()
-    {
-        return m_dispHeight;
-    }
 
 private:
     virtual void initInternal() = 0;
     virtual void write_cmd(uint8_t cmd) = 0;
     virtual void write_data(uint8_t* buf, uint nLen) = 0;
 
-    uint16_t m_dispWidth;
-    uint16_t m_dispHeight;
     bool m_bExternalVcc;
     uint m_nPages;
 };
