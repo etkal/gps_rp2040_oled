@@ -40,6 +40,7 @@ add_compile_definitions(WS2812_LED_IS_RGB)
 add_compile_definitions(DISPLAY_ON_CORE_1)
 
 # Time zone for clock display (examples: UTC, America/New_York, Europe/London)
+#
 add_compile_definitions(TIME_ZONE=\"America/New_York\")
 # DST override for clock display: AUTOMATIC, NO, or YES
 add_compile_definitions(USE_DST=AUTOMATIC)
@@ -70,7 +71,7 @@ add_compile_definitions(ECHO_TO_UART1)
 # a decent approximation of the actual battery voltage, you will need to measure on your device.
 #
 add_compile_definitions(DISPLAY_VSYS_VOLTAGE)
-add_compile_definitions(ADC_GPIO_PIN=26) # Override if not pico / pico_w
+#add_compile_definitions(ADC_GPIO_PIN=26) # Override if not pico / pico_w
 add_compile_definitions(ADC_REF_ADJUST=1.118f) # ADC reference voltage adjustment ratio
 add_compile_definitions(SCHOTTKY_ADJUST=0.20f) # Schottky diode voltage drop
 add_compile_definitions(PICO_POWER_SAMPLE_COUNT=10) # Number of samples to take for power measurement
@@ -106,15 +107,17 @@ add_compile_options(-Wall
 
 if(PICO_DEBUGPROBE)
     add_compile_definitions(PICO_DEBUGPROBE)
+    # set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O0 -g3")
+    # set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g3")
     # Set stdout to use UART1 for debugprobe
-    add_compile_definitions(gps_oled PRIVATE
+    add_compile_definitions(${PROJECT_NAME} PRIVATE
         PICO_DEFAULT_UART=1
-        PICO_DEFAULT_UART_TX_PIN=4
-        PICO_DEFAULT_UART_RX_PIN=5
+        PICO_DEFAULT_UART_TX_PIN=8
+        PICO_DEFAULT_UART_RX_PIN=9
     )
 endif()
 
-add_executable(gps_oled)
+add_executable(${PROJECT_NAME})
 pico_enable_stdio_usb(${PROJECT_NAME} 1)
 if(PICO_DEBUGPROBE)
     pico_enable_stdio_uart(${PROJECT_NAME} 1) # for debugprobe
@@ -122,21 +125,28 @@ endif()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/generated)
 # generate the header file into the source tree as it is included in the RP2040 datasheet
-pico_generate_pio_header(gps_oled
-    ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio
+pico_generate_pio_header(${PROJECT_NAME}
+    ${CMAKE_CURRENT_LIST_DIR}/src/common/ws2812.pio
     OUTPUT_DIR
     ${CMAKE_CURRENT_LIST_DIR}/generated
 )
 
 add_subdirectory(src)
+add_subdirectory(src/common)
+add_subdirectory(src/display)
+add_subdirectory(src/font)
+add_subdirectory(src/gps)
 
-target_include_directories(gps_oled PRIVATE
+target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/src
+    ${CMAKE_CURRENT_LIST_DIR}/src/common
+    ${CMAKE_CURRENT_LIST_DIR}/src/display
     ${CMAKE_CURRENT_LIST_DIR}/src/font
+    ${CMAKE_CURRENT_LIST_DIR}/src/gps
 )
 
-target_link_libraries(gps_oled
+target_link_libraries(${PROJECT_NAME}
     pico_stdlib
     pico_stdio
     hardware_gpio
@@ -149,11 +159,11 @@ target_link_libraries(gps_oled
 )
 
 if(PICO_BOARD STREQUAL pico_w OR PICO_BOARD STREQUAL pico2_w)
-    target_link_libraries(gps_oled
+    target_link_libraries(${PROJECT_NAME}
         pico_cyw43_arch_none
     )
 endif()
 
 
 # create map/bin/hex/uf2 file in addition to ELF.
-pico_add_extra_outputs(gps_oled)
+pico_add_extra_outputs(${PROJECT_NAME})
