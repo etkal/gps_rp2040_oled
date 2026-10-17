@@ -132,6 +132,8 @@ int main()
     }
 #endif
 
+    LogInfo("Starting GPS application...");
+
     TimeMgr::InitializeSingleton(TIME_ZONE);
 
 #if defined(DISPLAY_VSYS_VOLTAGE)
@@ -142,8 +144,6 @@ int main()
 #endif
 #endif // DISPLAY_VSYS_VOLTAGE
     auto spPowerMgr = PowerMgr::GetInstance();
-
-    LogInfo("Starting GPS application...");
 
 #if defined(SEEED_XIAO_RP2040)
     // Clear LED(s) on XIAO (default on)
