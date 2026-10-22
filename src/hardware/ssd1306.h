@@ -60,7 +60,10 @@ public:
 
     void Initialize() override;
     void Show() override;
-    uint RecommendedFontSize() const override {return 12;}
+    uint RecommendedFontSize() const override
+    {
+        return 12;
+    }
 
     void DisplayOff();
     void DisplayOn();

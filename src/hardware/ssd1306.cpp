@@ -31,9 +31,6 @@
 #if !defined(DISPLAY_QUADRANTS)
 #define DISPLAY_QUADRANTS 1
 #endif
-#if DISPLAY_QUADRANTS != 1
-#error "Only DISPLAY_QUADRANTS == 1 is supported" 
-#endif
 
 SSD1306::SSD1306(uint nWidth, uint nHeight, bool bExternalVcc)
     : Display(nWidth, nHeight),

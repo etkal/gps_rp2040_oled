@@ -121,8 +121,8 @@ int main()
 
 #if !defined(NDEBUG)
     timer_hw->dbgpause = 0;
+    sleep_ms(2000);
 #endif
-    sleep_ms(1000);
 
 #if defined(PLATFORM_PICO_W)
     if (cyw43_arch_init())

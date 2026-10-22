@@ -264,7 +264,7 @@ void GPS_OLED::showTime(const GPSData::Shared& spGPSData)
 
         if (!bTextTime)
         {
-            drawClock(Width() / 2 - Height() / 2, 0, Height() / 2 - 1, spGPSData->strGPSTime);
+            drawClock(Width() / 2, Height() / 2, Height() / 2 - 1, spGPSData->strGPSTime);
         }
         else
         {
@@ -349,6 +349,6 @@ void GPS_OLED::showSpeed(const GPSData::Shared& spGPSData)
 void GPS_OLED::showSplashScreen()
 {
     SetFont(get_recommended_font(16));
-    showScreenMessage("ET GPS");
+    showScreenMessage(PRODUCT_SPLASH_STRING);
     sleep_ms(2000);
 }
